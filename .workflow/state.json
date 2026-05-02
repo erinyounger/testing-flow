@@ -1,0 +1,14 @@
+{
+  "status": "active",
+  "artifacts": [
+    {
+      "id": "standard-server-test-framework-2026-05-02",
+      "description": "帮我设计并实现一个服务器的自动化测试框架，具备服务器生态型产品的扩展能力，能够覆盖整机、部件、BMC/BIOS分层测试",
+      "completed_at": "2026-05-03T01:00:00",
+      "directory": ".workflow/scratch/standard-server-test-framework-2026-05-02",
+      "verified": "skipped"
+    }
+  ],
+  "last_updated": "2026-05-03T01:00:00",
+  "initialized": "2026-05-02T00:00:00"
+}

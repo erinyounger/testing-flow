@@ -1,0 +1,122 @@
+{
+  "id": "TASK-002",
+  "title": "Implement hardware layer tests (whole machine testing)",
+  "description": "Implement the hardware layer test module for whole machine testing including: power management tests, boot sequence validation, stress testing, performance benchmarks, and thermal monitoring. This layer tests the server as a complete system.",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/layers/hardware/",
+  "focus_paths": ["src/layers/hardware/", "tests/hardware/"],
+  "depends_on": ["TASK-001"],
+  "convergence": {
+    "criteria": [
+      "Power cycling tests can execute via IPMI or hardware API and validate system state transitions",
+      "Boot sequence tests verify BIOS POST, bootloader, and OS initialization in correct order",
+      "Stress tests (CPU, memory, IO) can run with configurable duration and intensity parameters",
+      "Thermal monitoring tests validate fan speeds and temperature readings across all sensors",
+      "Performance benchmarks produce comparable metrics across test runs"
+    ],
+    "verification": "Run pytest tests/hardware/ -v and verify all hardware layer tests execute against mock or real hardware"
+  },
+  "files": [
+    {
+      "path": "src/layers/__init__.py",
+      "action": "create",
+      "target": "Layers package initialization"
+    },
+    {
+      "path": "src/layers/hardware/__init__.py",
+      "action": "create",
+      "target": "Hardware layer initialization"
+    },
+    {
+      "path": "src/layers/hardware/layer.py",
+      "action": "create",
+      "target": "HardwareLayer class implementing LayerProtocol"
+    },
+    {
+      "path": "src/layers/hardware/power.py",
+      "action": "create",
+      "target": "Power management tests (cycle, state, redundancy)"
+    },
+    {
+      "path": "src/layers/hardware/boot.py",
+      "action": "create",
+      "target": "Boot sequence validation tests"
+    },
+    {
+      "path": "src/layers/hardware/stress.py",
+      "action": "create",
+      "target": "Stress testing module (CPU, memory, IO stress)"
+    },
+    {
+      "path": "src/layers/hardware/thermal.py",
+      "action": "create",
+      "target": "Thermal monitoring and fan control tests"
+    },
+    {
+      "path": "src/layers/hardware/performance.py",
+      "action": "create",
+      "target": "Performance benchmark tests"
+    },
+    {
+      "path": "tests/hardware/test_power.py",
+      "action": "create",
+      "target": "Power management unit tests"
+    },
+    {
+      "path": "tests/hardware/test_boot.py",
+      "action": "create",
+      "target": "Boot sequence unit tests"
+    },
+    {
+      "path": "tests/hardware/test_stress.py",
+      "action": "create",
+      "target": "Stress test unit tests"
+    },
+    {
+      "path": "tests/hardware/test_thermal.py",
+      "action": "create",
+      "target": "Thermal monitoring unit tests"
+    },
+    {
+      "path": "tests/hardware/test_performance.py",
+      "action": "create",
+      "target": "Performance benchmark unit tests"
+    },
+    {
+      "path": "conftest.py",
+      "action": "create",
+      "target": "Pytest configuration with hardware layer fixtures"
+    }
+  ],
+  "implementation": [
+    "Create HardwareLayer class implementing LayerProtocol with setup/execute/teardown methods",
+    "Implement PowerTests: power_cycle (on/off/on), power_state (on/off/standby), power_redundancy (dual PSU failover)",
+    "Implement BootTests: bios_post_check, bootloader_verification, os_boot_timeout, boot_device_order",
+    "Implement StressTests: cpu_stress (configurable cores/duration), memory_stress (memory fill + access), io_stress (disk IOPS)",
+    "Implement ThermalTests: fan_speed_validation, temperature_sensor_reading, thermal_throttle_detection, cooling_efficiency",
+    "Implement PerformanceTests: cpu_benchmark, memory_bandwidth, disk_throughput, network_latency",
+    "Create HardwareApi abstract interface for IPMI/Redfish/hardware vendor SDK integration",
+    "Implement mock HardwareApi for testing without real hardware",
+    "Write comprehensive unit tests for each module using mock hardware API",
+    "Add hardware-specific pytest fixtures: ipmi_connection, hardware_sensors, power_controller"
+  ],
+  "test": {
+    "commands": ["pytest tests/hardware/ -v", "pytest tests/hardware/test_power.py -v --hardware=mock"],
+    "unit": ["tests/hardware/test_power.py", "tests/hardware/test_boot.py", "tests/hardware/test_stress.py"],
+    "success_metrics": ["all hardware layer tests pass", "tests run with mock hardware API", "pytest --collect-only shows hardware tests discovered"]
+  },
+  "reference": {
+    "pattern": "Layer protocol from TASK-001",
+    "files": ["src/core/layer.py"]
+  },
+  "meta": {
+    "status": "pending",
+    "estimated_time": "2h",
+    "risk": "medium",
+    "wave": 1,
+    "executor": "agent"
+  }
+}

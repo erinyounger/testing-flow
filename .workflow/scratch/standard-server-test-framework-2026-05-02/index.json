@@ -1,0 +1,21 @@
+{
+  "id": "standard-server-test-framework-2026-05-02",
+  "type": "standard",
+  "title": "帮我设计并实现一个服务器的自动化测试框架，具备服务器生态型产品的扩展能力，能够覆盖整机、部件、BMC/BIOS分层测试",
+  "status": "completed",
+  "created_at": "2026-05-02T00:00:00",
+  "updated_at": "2026-05-03T01:00:00",
+  "flags": {
+    "discuss": false,
+    "full": true
+  },
+  "plan": {
+    "task_ids": ["TASK-001", "TASK-002", "TASK-003", "TASK-004"],
+    "task_count": 4
+  },
+  "execution": {
+    "method": "agent",
+    "tasks_completed": 4,
+    "tasks_total": 4
+  }
+}

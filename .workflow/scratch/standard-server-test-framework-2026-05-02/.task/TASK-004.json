@@ -1,0 +1,119 @@
+{
+  "id": "TASK-004",
+  "title": "Implement BMC/BIOS layer tests (firmware management interface testing)",
+  "description": "Implement the BMC/BIOS layer test module for testing server firmware management interfaces including: IPMI sensor readings, Redfish API tests, BIOS configuration validation, firmware update testing, and SEL (System Event Log) tests. This layer validates the firmware management infrastructure.",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/layers/bmc/",
+  "focus_paths": ["src/layers/bmc/", "tests/bmc/"],
+  "depends_on": ["TASK-001"],
+  "convergence": {
+    "criteria": [
+      "IPMI tests can read sensor data (temperature, voltage, fan speed) and validate against expected ranges",
+      "Redfish API tests cover: GET/PATCH /Systems, /Chassis, /Managers endpoints and validate response schema",
+      "BIOS configuration tests verify BIOS setting values match expected configuration profiles",
+      "Firmware update tests in src/layers/bmc/firmware.py produce: flash_progress_percent property, rollback_detected boolean, version string from get_firmware_version() method after update",
+      "SEL tests verify event logging, log clearing, and alert configuration via src/layers/bmc/sel.py SelManager class",
+      "BMC layer accesses hardware context via LayerContext.parent reference to HardwareLayer for integrated testing"
+    ],
+    "verification": "Run pytest tests/bmc/ -v and verify all BMC/BIOS tests execute with mock or real BMC"
+  },
+  "files": [
+    {
+      "path": "src/layers/bmc/__init__.py",
+      "action": "create",
+      "target": "BMC layer initialization"
+    },
+    {
+      "path": "src/layers/bmc/layer.py",
+      "action": "create",
+      "target": "BMCLayer class implementing LayerProtocol"
+    },
+    {
+      "path": "src/layers/bmc/ipmi.py",
+      "action": "create",
+      "target": "IPMI sensor and command tests"
+    },
+    {
+      "path": "src/layers/bmc/redfish.py",
+      "action": "create",
+      "target": "Redfish API tests"
+    },
+    {
+      "path": "src/layers/bmc/bios_config.py",
+      "action": "create",
+      "target": "BIOS configuration validation tests"
+    },
+    {
+      "path": "src/layers/bmc/firmware.py",
+      "action": "create",
+      "target": "Firmware update tests"
+    },
+    {
+      "path": "src/layers/bmc/sel.py",
+      "action": "create",
+      "target": "System Event Log tests"
+    },
+    {
+      "path": "tests/bmc/test_ipmi.py",
+      "action": "create",
+      "target": "IPMI unit tests"
+    },
+    {
+      "path": "tests/bmc/test_redfish.py",
+      "action": "create",
+      "target": "Redfish API unit tests"
+    },
+    {
+      "path": "tests/bmc/test_bios_config.py",
+      "action": "create",
+      "target": "BIOS configuration unit tests"
+    },
+    {
+      "path": "tests/bmc/test_firmware.py",
+      "action": "create",
+      "target": "Firmware update unit tests"
+    },
+    {
+      "path": "tests/bmc/test_sel.py",
+      "action": "create",
+      "target": "SEL unit tests"
+    },
+    {
+      "path": "src/layers/bmc/clients.py",
+      "action": "create",
+      "target": "IPMI and Redfish client abstractions"
+    }
+  ],
+  "implementation": [
+    "Create BMCLayer class implementing LayerProtocol with access to parent hardware context",
+    "Implement IpmiClient abstract class and MockIpmiClient for testing",
+    "Implement IpmiTests: sensor_reading_validation, sdr_dump_parsing, sel_listing, raw_command_execution, user_management",
+    "Implement RedfishClient abstract class and MockRedfishClient using aiosfinit for testing",
+    "Implement RedfishTests: systems_endpoint_get, chassis_endpoint_get, managers_endpoint_get, patch_operation, schema_validation",
+    "Implement BiosConfigTests: setting_enumeration, setting_value_validation, profile_export_import, secure_boot_status, tpm_status",
+    "Implement FirmwareTests: flash_progress_tracking, rollback_detection, bic_update_validation, bios_update_with_recovery, version_verification_post_update",
+    "Implement SelTests: event_log_enumeration, event_timestamp_validation, log_clear_operation, alert_configuration (PET/SNMP/email), SEL overflow handling",
+    "Create BMCClientFactory for creating appropriate client based on BMC type (Dell iDRAC, HP iLO, Lenovo XCC, generic IPMI)",
+    "Write comprehensive unit tests for each BMC module using mock clients",
+    "Implement integration tests connecting to mock BMC for end-to-end validation"
+  ],
+  "test": {
+    "commands": ["pytest tests/bmc/ -v", "pytest tests/bmc/test_ipmi.py -v --bmc=mock"],
+    "unit": ["tests/bmc/test_ipmi.py", "tests/bmc/test_redfish.py", "tests/bmc/test_bios_config.py"],
+    "success_metrics": ["all BMC/BIOS layer tests pass", "tests run with mock BMC client", "pytest --collect-only shows BMC tests discovered"]
+  },
+  "reference": {
+    "pattern": "Layer protocol from TASK-001, client abstraction pattern",
+    "files": ["src/core/layer.py", "src/layers/hardware/power.py"]
+  },
+  "meta": {
+    "status": "pending",
+    "estimated_time": "2h",
+    "risk": "medium",
+    "wave": 2,
+    "executor": "agent"
+  }
+}
