@@ -1,0 +1,58 @@
+{
+  "id": "TASK-{{NNN}}",
+  "title": "{{TITLE}}",
+  "description": "{{DESCRIPTION}}",
+
+  "issue_id": null,
+  "type": "feature",
+  "priority": "medium",
+  "effort": "medium",
+  "action": "{{CONCRETE_ACTION}}",
+  "status": "pending",
+  "completed_at": null,
+
+  "scope": "{{MODULE_PATH}}",
+  "focus_paths": [],
+
+  "read_first": [],
+  "depends_on": [],
+  "wave": 1,
+  "executor": "agent",
+
+  "convergence": {
+    "criteria": [
+      "{{FILE_PATH}} contains '{{EXACT_STRING}}'",
+      "{{TEST_COMMAND}} exits 0"
+    ],
+    "verification": "{{VERIFICATION_COMMAND}}"
+  },
+
+  "files": [
+    {
+      "path": "{{FILE_PATH}}",
+      "action": "create|modify",
+      "target": "{{FUNCTION_OR_CLASS}}"
+    }
+  ],
+
+  "implementation": [
+    "{{STEP_1}}",
+    "{{STEP_2}}"
+  ],
+
+  "test": {
+    "commands": [],
+    "success_metrics": []
+  },
+
+  "reference": {
+    "pattern": "{{PATTERN_NAME}}",
+    "files": []
+  },
+
+  "meta": {
+    "estimated_time": null,
+    "risk": "low",
+    "checkpoint": false
+  }
+}

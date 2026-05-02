@@ -1,0 +1,11 @@
+{
+  "plan": {
+    "task_ids": [],
+    "task_count": 0
+  },
+  "execution": {
+    "method": "agent",
+    "tasks_completed": 0,
+    "tasks_total": 0
+  }
+}

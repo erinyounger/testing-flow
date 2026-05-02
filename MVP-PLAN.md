@@ -36,6 +36,12 @@
 
 ```
 testing-flow/
+├── .claude/
+│   ├── commands/                    # Layer 1: Command 定义 (Claude Code Skill)
+│   │   └── tflow-standard.md         # 标准通用任务命令
+│   └── workflows/                   # Layer 2: Workflow 模板
+│       └── standard.md                  # 标准通用任务工作流
+│
 ├── src/
 │   └── tflow/
 │       ├── __init__.py
@@ -178,6 +184,102 @@ test_<module>_<scenario>_<expected>
 | **index.json** | `flags`, `plan`, `execution` |
 | **verification.json** | `layers{}`, `convergence_check{}`, `gaps[]` |
 | **config.json** | `workflow`, `execution`, `git`, `gates`, `specs` |
+
+---
+
+## 四、Command 端到端验证（使用 Claude Agent）
+
+### 4.1 验证架构
+
+参照 Maestro command 架构，实现 `.claude/commands/tflow-standard.md` 命令用于通用任务执行。
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 1: Command  (.claude/commands/tflow-standard.md)      │
+│  "做什么" — 声明式状态机：步骤 + 路由                         │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ Skill Tool 调用
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 2: Workflow  (.claude/workflows/standard.md)
+│  "怎么做" — 可复用流程模板                                   │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ Agent 调度
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 3: Claude Code Agent                                  │
+│  "谁来做" — workflow-planner/executor/verifier                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 Command 文件结构
+
+```markdown
+# .claude/commands/tflow-standard.md
+---
+name: tflow-standard
+description: 使用内置 Claude Agent 执行通用任务（Plan → Execute → Verify）
+argument-hint: "<任务描述> [--verify] [--full]"
+allowed-tools:
+  - Read | Write | Edit | Bash | Glob | Grep | Agent
+---
+
+<purpose>
+使用标准 Maestro 工作流执行通用任务...
+</purpose>
+
+<required_reading>
+@/home/eeric/code/testing-flow/.claude/workflows/standard.md
+</required_reading>
+
+<execution>
+### Step 1: Initialize verification session
+### Step 2: Run workflow verification
+### Step 3: Execute quick workflow
+### Step 4: Report results
+</execution>
+```
+
+### 4.3 Workflow 文件结构
+
+```markdown
+# .claude/workflows/standard.md
+
+## 阶段一：计划 (Plan)
+- 生成 plan.json
+- 生成 TASK-*.json
+
+## 阶段二：执行 (Execute)
+- 波次调度执行
+- 原子 git 提交
+
+## 阶段三：验证 (Verify)
+- 三层验证：存在性 / 实质性 / 连接性
+```
+
+### 4.4 验证命令
+
+```bash
+# 验证 command 和 workflow 定义是否正确
+/tflow-standard "测试任务描述" --verify
+
+# 执行完整工作流
+/tflow-standard "实现登录功能" --full
+
+# 执行并验证
+/tflow-standard "实现登录功能" --verify --full
+```
+
+### 4.5 Command 验证检查项
+
+| 检查项 | 说明 |
+|--------|------|
+| command 文件存在 | `.claude/commands/tflow-standard.md` 存在 |
+| YAML frontmatter 有效 | name, description, allowed-tools 字段完整 |
+| required_reading 引用正确 | 指向有效的 workflow 模板 |
+| execution 步骤定义 | 步骤清晰、可执行 |
+| error_codes 定义 | 错误码覆盖主要失败场景 |
+| success_criteria 定义 | 成功标准可验证 |
 
 ---
 

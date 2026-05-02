@@ -1,0 +1,38 @@
+{
+  "id": "{{TYPE}}-{{SLUG}}-{{DATE}}",
+  "type": "standard",
+  "title": "{{TITLE}}",
+  "status": "active",
+  "created_at": "{{TIMESTAMP}}",
+  "updated_at": "{{TIMESTAMP}}",
+
+  "summary": "{{PLAN_SUMMARY}}",
+  "approach": "{{APPROACH}}",
+  "task_ids": [],
+  "task_count": 0,
+  "complexity": null,
+  "estimated_time": null,
+  "recommended_execution": "Agent",
+
+  "waves": [
+    {
+      "wave": 1,
+      "tasks": []
+    }
+  ],
+
+  "design_decisions": [],
+
+  "shared_context": {
+    "patterns": [],
+    "conventions": [],
+    "dependencies": []
+  },
+
+  "_metadata": {
+    "timestamp": "{{ISO_8601}}",
+    "source": "agent-planner",
+    "planning_mode": "standard",
+    "plan_type": "feature"
+  }
+}

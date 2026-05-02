@@ -1,0 +1,50 @@
+{
+  "phase": "{{PHASE_ID}}",
+  "status": "pending",
+  "verified_at": null,
+  "verifier": "agent-verifier",
+
+  "layers": {
+    "existence": {
+      "pass": true,
+      "checks": []
+    },
+    "substance": {
+      "pass": true,
+      "checks": []
+    },
+    "connection": {
+      "pass": true,
+      "checks": []
+    }
+  },
+
+  "convergence_check": {
+    "TASK-001": {
+      "status": "pass",
+      "criteria": [
+        {
+          "criterion": "{{CRITERION}}",
+          "pass": true,
+          "evidence": "{{EVIDENCE}}"
+        }
+      ]
+    }
+  },
+
+  "must_haves": {
+    "truths": [],
+    "artifacts": [],
+    "key_links": []
+  },
+
+  "gaps": [
+    {
+      "id": "GAP-001",
+      "layer": "existence|substance|connection",
+      "description": "{{DESCRIPTION}}",
+      "severity": "high|medium|low",
+      "task": "TASK-001"
+    }
+  ]
+}
