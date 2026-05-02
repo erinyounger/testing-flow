@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from tflow.agents.subprocess_agent import SubprocessAgent
+from tflow.agents.builtin_prompts import PLANNER_PROMPT, EXECUTOR_PROMPT
 from tflow.artifacts.plan import PlanArtifact
 
 
@@ -85,8 +86,8 @@ class WorkflowEngine:
         if not command:
             return {"step": step, "success": False, "error": "No command defined for step"}
 
-        # Execute via agent
-        agent_result = self.agent.run(command, agent_type="shell", timeout=60)
+        # Execute via agent - use "claude" agent_type for real code generation
+        agent_result = self.agent.run(command, agent_type="claude", timeout=120)
 
         return {
             "step": step,
@@ -96,16 +97,32 @@ class WorkflowEngine:
         }
 
     def _build_step_command(self, step: str, context: Dict[str, Any]) -> str:
-        """Build command for a step"""
-        # Map steps to commands based on context
-        step_commands = {
-            "plan": "echo 'Planning...'",
-            "execute": context.get("task", "echo 'Executing task...'"),
-            "verify": "echo 'Verifying...'",
-            "commit": "echo 'Committing...'",
-        }
+        """Build command for a step using Claude prompts"""
+        task = context.get("task", "")
+        filename = context.get("filename", self._task_to_filename(task))
 
-        return step_commands.get(step, f"echo 'Running step: {step}'")
+        if step == "plan":
+            prompt = PLANNER_PROMPT.format(task=task)
+            return prompt
+        elif step == "execute":
+            prompt = EXECUTOR_PROMPT.format(task=task, filename=filename)
+            return prompt
+        elif step == "verify":
+            return f"echo 'Verifying implementation for task: {task}'"
+        elif step == "commit":
+            return f"echo 'Committing changes for task: {task}'"
+
+        return f"echo 'Running step: {step}'"
+
+    def _task_to_filename(self, task: str) -> str:
+        """Convert task description to a reasonable filename"""
+        # Simple heuristic: take first few words, lowercase, underscores
+        words = task.split()[:3]
+        filename = "_".join(words).lower()
+        # Add .py if it looks like code
+        if not filename.endswith(".py"):
+            filename = f"{filename}.py"
+        return filename
 
     def _substitute(self, template: str, context: Dict[str, Any]) -> str:
         """Replace {{variable}} with context values"""

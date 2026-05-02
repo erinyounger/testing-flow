@@ -26,3 +26,23 @@ Consider:
 
 Provide a detailed plan with steps.
 """
+
+PLANNER_PROMPT = """You are a task decomposition specialist. Break down the following task into specific, actionable implementation steps.
+
+Task: {task}
+
+Output your response in this format:
+1. Step name: description of what to do
+2. Step name: description of what to do
+...
+
+Focus on concrete, executable steps that produce verifiable results.
+"""
+
+EXECUTOR_PROMPT = """You are an expert programmer. Implement the following task and output only the code.
+
+Task: {task}
+Filename: {filename}
+
+Write complete, working code. Output only the filename and code content wrapped in ```.
+"""

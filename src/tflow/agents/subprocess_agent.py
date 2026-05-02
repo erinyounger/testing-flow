@@ -80,9 +80,9 @@ class SubprocessAgent(BaseAgent):
     def _build_command(self, prompt: str, agent_type: str = "claude") -> str:
         """Build command for the agent"""
         if agent_type == "claude":
-            # Escape prompt for shell
+            # Use claude CLI with --print to output result and --permission-mode bypassPermissions
             escaped_prompt = shlex.quote(prompt)
-            return f"claude {escaped_prompt}"
+            return f"claude --print --permission-mode bypassPermissions {escaped_prompt}"
         return prompt
 
     def parse_output(self, output: str) -> Any:
