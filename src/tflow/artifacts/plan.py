@@ -66,11 +66,18 @@ class PlanArtifact:
         """Add a task to the plan"""
         task_id = task["id"]
 
+        # Ensure TASK- prefix for consistency with get_tasks()
+        if not task_id.startswith("TASK-"):
+            task_id = f"TASK-{task_id}"
+
         # Create task file
         self.task_dir.mkdir(parents=True, exist_ok=True)
         task_file = self.task_dir / f"{task_id}.json"
+        # Update task dict with prefixed ID for consistency
+        task_to_save = task.copy()
+        task_to_save["id"] = task_id
         with open(task_file, "w") as f:
-            json.dump(task, f, indent=2, ensure_ascii=False)
+            json.dump(task_to_save, f, indent=2, ensure_ascii=False)
 
         # Update plan.json task_ids
         if self.plan_file.exists():

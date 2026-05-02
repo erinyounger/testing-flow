@@ -1,13 +1,18 @@
 import re
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+from tflow.agents.subprocess_agent import SubprocessAgent
+from tflow.artifacts.plan import PlanArtifact
 
 
 class WorkflowEngine:
     """Workflow template engine with variable substitution and conditionals"""
 
-    def __init__(self, workflow_dir: str):
+    def __init__(self, workflow_dir: str, plan_artifact: Optional[PlanArtifact] = None):
         self.workflow_dir = Path(workflow_dir)
+        self.plan_artifact = plan_artifact
+        self.agent = SubprocessAgent()
 
     def load(self, workflow_name: str) -> str:
         """Load workflow template"""
@@ -40,6 +45,9 @@ class WorkflowEngine:
             line = line.strip()
             if not line:
                 continue
+            # Skip markdown headers
+            if line.startswith("#"):
+                continue
             # Try "Step: name" pattern first
             match = re.match(r"Step:\s*(\w+)\s*$", line)
             if match:
@@ -55,6 +63,49 @@ class WorkflowEngine:
             "steps": filtered_steps,
             "skipped": skip_steps
         }
+
+    def execute(self, context: Dict[str, Any], skip_steps: List[str] = None) -> Dict[str, Any]:
+        """Execute workflow steps and return results"""
+        result = self.run(context, skip_steps)
+        steps = result.get("steps", [])
+
+        execution_results = []
+        for step in steps:
+            step_result = self._execute_step(step, context)
+            execution_results.append(step_result)
+
+        result["execution_results"] = execution_results
+        return result
+
+    def _execute_step(self, step: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a single step using SubprocessAgent"""
+        # Build command from step template
+        command = self._build_step_command(step, context)
+
+        if not command:
+            return {"step": step, "success": False, "error": "No command defined for step"}
+
+        # Execute via agent
+        agent_result = self.agent.run(command, agent_type="shell", timeout=60)
+
+        return {
+            "step": step,
+            "success": agent_result.success,
+            "output": agent_result.output,
+            "error": agent_result.error
+        }
+
+    def _build_step_command(self, step: str, context: Dict[str, Any]) -> str:
+        """Build command for a step"""
+        # Map steps to commands based on context
+        step_commands = {
+            "plan": "echo 'Planning...'",
+            "execute": context.get("task", "echo 'Executing task...'"),
+            "verify": "echo 'Verifying...'",
+            "commit": "echo 'Committing...'",
+        }
+
+        return step_commands.get(step, f"echo 'Running step: {step}'")
 
     def _substitute(self, template: str, context: Dict[str, Any]) -> str:
         """Replace {{variable}} with context values"""
