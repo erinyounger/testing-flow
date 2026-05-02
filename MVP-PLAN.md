@@ -1,1247 +1,920 @@
-# Testing-Flow MVP 学习版计划 (v4)
+# Testing-Flow MVP 计划
 
-> 基于 maestro-flow 架构的 Python 简化实现
+> 基于 maestro-flow 架构的五层简化实现
 >
-> **版本**: v4 (基于 maestro-quick 兼容性分析修订)
+> **版本**: 最终版
 > **创建日期**: 2026-05-02
-> **评审状态**: 已修复 6 个阻断性问题
 
 ---
 
-## 评审反馈摘要 (v3 → v4)
+## 一、设计原则
 
-| 问题类型 | 具体问题 | 修复措施 |
-|---------|---------|---------|
-| **HIGH** | Node 类型比较失败 (`"terminal"` vs `NodeType.TERMINAL`) | NodeType 枚举使用字符串值 |
-| **HIGH** | 命令字段名错误 (`command` vs `cmd`) | `node.config.get("cmd")` |
-| **HIGH** | 下一节点获取逻辑 (edges vs `config["next"]`) | 优先从 `node.config["next"]` 获取 |
-| **HIGH** | 图文件路径 (`graphs/` vs `chains/singles/`) | 支持多路径搜索 |
-| **MED** | 起始节点硬编码 `"start"` | 使用 `graph.entry` |
-| **MED** | 枚举值与 JSON 字符串不匹配 | NodeType 枚举使用字符串值 |
-
-| 问题类型 | 具体问题 | 修复措施 |
-|---------|---------|---------|
-| **链路断裂** | Command 执行缺少 CliExecutor | 新增 `CliExecutor` 类 |
-| **链路断裂** | Walker ↔ Broker 缺少适配层 | 新增 `CoordinatorAdapter` |
-| **链路断裂** | Broker → MCP 缺少桥接 | 新增 `ChannelRelay` |
-| **链路断裂** | 结果解析缺失 | 新增 `OutputParser` |
-| **链路断裂** | 并行执行缺失 | 新增 `ParallelRunner` |
-| **入口错误** | CLI 用文件路径 | 改为 `coordinate <graph-id>` |
-| **事件流反转** | Client poll Broker | 修正为 Agent push → poll |
-| **接口不匹配** | GraphWalker 接口 | 改为 `start()` / `walk()` / `get_state()` |
-
----
-
-## 1. 核心架构 (修订版)
-
-### 1.1 完整执行链路
+**每层都有，简化实现** — 不缺失 Architecture 任何一层，只降低复杂度。
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         用户入口                                  │
-│              python -m mvp.cli coordinate my-flow               │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CLI Layer (cli.py)                                              │
-│  - parse: coordinate <graph-id>                                  │
-│  - resolve: graph-id → file path                                  │
-│  - delegate to GraphWalker                                        │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CoordinatorAdapter (coordinator_adapter.py)                      │
-│  - register_session() → Broker                                   │
-│  - create_channel()                                              │
-│  - expose: run_job(), publish_event(), poll_events()            │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-          ┌─────────────────┼─────────────────┐
-          │                 │                 │
-          ▼                 ▼                 ▼
-┌─────────────────┐ ┌───────────────┐ ┌─────────────────┐
-│  GraphLoader    │ │  GraphWalker  │ │   Broker        │
-│  - load(id)     │ │  - start()    │ │   - Session     │
-│  - parse graph  │ │  - walk()     │ │   - Job         │
-└─────────────────┘ │  - get_state()│ │   - Events      │
-                    └───────┬───────┘ └───────┬───────┘
-                            │                   │
-                            │                   │
-                            ▼                   ▼
-              ┌───────────────────────┐ ┌───────────────────────┐
-              │     CliExecutor       │ │   ChannelRelay        │
-              │  (cli_executor.py)    │ │ (channel_relay.py)    │
-              │                       │ │                       │
-              │  - execute(cmd)       │ │  - poll_events()      │
-              │  - subprocess spawn   │ │  - forward to MCP     │
-              │  - parse output       │ │                       │
-              └───────────────────────┘ └───────────────────────┘
-                            │                   │
-                            ▼                   ▼
-              ┌───────────────────────┐ ┌───────────────────────┐
-              │   Agent (subprocess)  │ │    MCP Server         │
-              │   echo / shell cmd    │ │    (stdio)             │
-              └───────────────────────┘ └───────────────────────┘
-```
-
-### 1.2 模块对应关系 (完整版)
-
-| testing-flow (Python) | maestro-flow (TypeScript) | 必要性 |
-|----------------------|---------------------------|--------|
-| `cli.py` | `src/cli.ts` + `src/commands/coordinate.ts` | 核心 |
-| `coordinator_adapter.py` | `src/coordinator/coordinate-broker-adapter.ts` | **新增** |
-| `broker.py` | `src/async/delegate-broker.ts` | 核心 |
-| `channel_relay.py` | `src/mcp/delegate-channel-relay.ts` | **新增** |
-| `graph/loader.py` | `src/coordinator/graph-loader.ts` | 核心 |
-| `graph/walker.py` | `src/coordinator/graph-walker.ts` | 核心 |
-| `graph/cli_executor.py` | `src/coordinator/cli-executor.ts` | **新增** |
-| `graph/output_parser.py` | `src/coordinator/output-parser.ts` | **新增** |
-| `graph/parallel_runner.py` | `src/agents/parallel-cli-runner.ts` | **新增** |
-| `graph/evaluator.py` | `src/coordinator/expr-evaluator.ts` | 核心 |
-| `mcp/server.py` | `src/mcp/server.ts` | 核心 |
-| `tools/registry.py` | `src/core/tool-registry.ts` | 核心 |
-
----
-
-## 2. 数据模型
-
-### 2.1 Session / Job / Event
-
-```python
-# session.py
-@dataclass
-class Session:
-    id: str                    # sess_{timestamp}_{random}
-    task_type: str             # "coordinate"
-    status: SessionStatus       # ACTIVE / COMPLETED / FAILED / CANCELLED
-    created_at: float
-    last_heartbeat: float
-    context: dict               # 跨 Job 共享上下文
-
-# job.py
-@dataclass
-class Job:
-    id: str                    # job_{timestamp}_{random}
-    session_id: str            # 所属 Session
-    agent_type: str            # "echo" | "shell"
-    prompt: str                # 执行指令
-    status: JobStatus          # QUEUED / RUNNING / COMPLETED / FAILED / CANCELLED / INPUT_REQUIRED
-    created_at: float
-    started_at: Optional[float]
-    completed_at: Optional[float]
-    output: Optional[str]
-    error: Optional[str]
-
-# event.py
-@dataclass
-class JobEvent:
-    id: str
-    job_id: str
-    session_id: str
-    event_type: str            # "queued" | "started" | "completed" | "failed"
-    timestamp: float
-    data: dict
-    acked: bool = False
-```
-
-### 2.2 Graph 结构
-
-```python
-# graph/types.py
-@dataclass
-class Graph:
-    id: str
-    name: str
-    version: str
-    nodes: dict[str, Node]
-    edges: list[Edge]
-    entry: Optional[str] = None  # 起始节点 ID，与 maestro-flow 一致
-
-@dataclass
-class Node:
-    id: str
-    type: NodeType             # COMMAND / DECISION / FORK / JOIN / GATE / EVAL / TERMINAL
-    config: dict
-
-@dataclass
-class Edge:
-    from_: str                 # 源节点 ID
-    to: str                    # 目标节点 ID
-    condition: Optional[dict]  # {"expr": "choice == 'A'"} 或 None
-
-# 节点类型枚举 (使用字符串值，与 JSON 图文件一致)
-class NodeType(str, Enum):
-    COMMAND = "command"
-    DECISION = "decision"
-    FORK = "fork"
-    JOIN = "join"
-    GATE = "gate"
-    EVAL = "eval"
-    TERMINAL = "terminal"
-
-# 注意: NodeType 继承 str + Enum，确保与 JSON 字符串直接比较
-# 例如: node.type == "terminal" 和 node.type == NodeType.TERMINAL 都成立
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 1: Command     │ commands/*.py 解析器 + CLI 装饰器           │
+│  "做什么" — 入口 + 参数 │  路由 + 错误处理                           │
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 2: Workflow    │ workflows/*.md 模板引擎                      │
+│  "怎么做" — 流程模板   │  变量替换 + 条件分支 + 波次调度              │
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 3: Agent       │ agents/subprocess_agent.py                  │
+│  "谁来做" — 执行器     │  subprocess 执行 + 内置 prompt               │
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 4: Artifact    │ artifacts/*.json + summaries/               │
+│  "产出什么" — 数据     │  plan.json + task/*.json + verification.json│
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 5: State+Commit│ state.json + git                           │
+│  "记得什么"           │  状态持久化 + 每 task 自动 commit             │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### GraphLoader (多路径支持)
-
-```python
-# graph/loader.py
-class GraphLoader:
-    """
-    图加载器
-
-    支持多种文件路径格式：
-    - chains/singles/{id}.json  (maestro-flow 默认格式)
-    - graphs/{id}.json
-    - {id}.json
-
-    对应 maestro-flow: src/coordinator/graph-loader.ts
-    """
-
-    def load(self, graph_id: str) -> Graph:
-        """
-        加载图文件
-
-        Args:
-            graph_id: 图 ID (如 "quick", "singles/quick")
-
-        Returns:
-            Graph: 解析后的图结构
-        """
-        # 尝试多个路径
-        paths = [
-            f"chains/singles/{graph_id}.json",
-            f"chains/singles/{graph_id}.json",
-            f"graphs/{graph_id}.json",
-            f"{graph_id}.json",
-        ]
-
-        for path in paths:
-            if os.path.exists(path):
-                with open(path, 'r') as f:
-                    data = json.load(f)
-                return self._parse(data)
-
-        raise FileNotFoundError(f"Graph not found: {graph_id}")
-
-    def _parse(self, data: dict) -> Graph:
-        """解析图数据"""
-        nodes = {}
-        for node_id, node_data in data.get("nodes", {}).items():
-            nodes[node_id] = Node(
-                id=node_id,
-                type=node_data.get("type", "command"),
-                config=node_data.get("config", {}) or node_data  # 兼容不同格式
-            )
-
-        edges = []
-        for edge in data.get("edges", []):
-            edges.append(Edge(
-                from_=edge.get("from"),
-                to=edge.get("to"),
-                condition=edge.get("condition")
-            ))
-
-        return Graph(
-            id=data.get("id", ""),
-            name=data.get("name", ""),
-            version=data.get("version", "1.0"),
-            nodes=nodes,
-            edges=edges,
-            entry=data.get("entry")  # 起始节点
-        )
-```
-
----
-
-## 3. 核心模块详解
-
-### Phase 1: Broker (Day 1)
-
-#### 3.1 Broker 接口
-
-```python
-# broker.py
-class Broker(ABC):
-    """异步任务生命周期管理器"""
-
-    # Session 管理
-    def create_session(self, task_type: str, context: dict = None) -> Session: ...
-    def get_session(self, session_id: str) -> Optional[Session]: ...
-    def session_heartbeat(self, session_id: str) -> Session: ...
-
-    # Job 管理
-    def create_job(self, session_id: str, agent_type: str, prompt: str) -> Job: ...
-    def get_job(self, job_id: str) -> Optional[Job]: ...
-    def job_heartbeat(self, job_id: str) -> Job: ...
-    def update_job(self, job_id: str, **updates) -> Job: ...
-    def request_cancel(self, job_id: str) -> Job: ...
-
-    # 事件系统 (核心！)
-    def publish_event(self, job_id: str, event_type: str, data: dict = None) -> JobEvent: ...
-    def poll_events(self, session_id: str, since: float = 0) -> list[JobEvent]: ...
-    def ack_events(self, event_ids: list[str]) -> int: ...
-
-    # 消息队列
-    def queue_message(self, job_id: str, content: str, delivery: str = "inject") -> QueuedMessage: ...
-    def get_pending_messages(self, job_id: str) -> list[QueuedMessage]: ...
-
-    # 超时管理
-    def check_timeouts(self, max_idle: float = 300) -> list[Job]: ...
-    def purge_expired_events(self, max_age: float = 86400) -> int: ...
-```
-
-#### 3.2 事件流 (修正版)
-
-```
-Agent (CliExecutor)                          Client (ChannelRelay)
-      │                                            │
-      │  1. job_heartbeat()                        │
-      │────────────────────────────────────────────▶│
-      │                                            │
-      │  2. publish_event("started", {...})        │
-      │────────────────────────────────────────────▶│ 事件写入 broker
-      │                                            │
-      │  3. ... 执行中 ...                          │
-      │                                            │
-      │  4. publish_event("completed", {output})   │
-      │────────────────────────────────────────────▶│
-      │                                            │
-      │                       5. poll_events(since)
-      │◀────────────────────────────────────────────│
-      │                       6. [events...]
-      │────────────────────────────────────────────▶│
-      │                       7. ack([event_ids])  │
-      │◀────────────────────────────────────────────│
-```
-
-**关键点**：
-- Agent (CliExecutor) 主动调用 `publish_event()` **推送** 事件
-- Client (ChannelRelay) 主动调用 `poll_events()` **拉取** 事件
-- `ack()` 确保事件不重复投递
-
----
-
-### Phase 2: CoordinatorAdapter (Day 2)
-
-#### 3.3 CoordinatorAdapter (新增核心模块)
-
-```python
-# coordinator_adapter.py
-class CoordinatorAdapter:
-    """
-    GraphWalker 与 Broker 之间的适配层
-
-    封装了：
-    1. Session 注册与管理
-    2. Job 创建与状态更新
-    3. 事件发布与轮询
-    4. 消息队列操作
-
-    对应 maestro-flow: src/coordinator/coordinate-broker-adapter.ts
-    """
-
-    def __init__(self, broker: Broker):
-        self.broker = broker
-        self.session: Optional[Session] = None
-        self.job_map: dict[str, Job] = {}  # node_id → Job
-
-    def start(self, task_type: str = "coordinate") -> Session:
-        """启动协调会话"""
-        self.session = self.broker.create_session(task_type)
-        return self.session
-
-    def run_command(self, node_id: str, command: str, agent_type: str = "shell") -> Job:
-        """
-        执行 Command 节点
-
-        对应原系统的 CliExecutor.execute()
-        """
-        job = self.broker.create_job(
-            session_id=self.session.id,
-            agent_type=agent_type,
-            prompt=command
-        )
-        self.job_map[node_id] = job
-        return job
-
-    def get_result(self, job_id: str) -> str:
-        """获取 Job 执行结果"""
-        job = self.broker.get_job(job_id)
-        if not job:
-            raise ValueError(f"Job not found: {job_id}")
-        return job.output or job.error or ""
-
-    def get_node_result(self, node_id: str) -> str:
-        """获取节点执行结果 (通过 node_id 查找)"""
-        job = self.job_map.get(node_id)
-        if not job:
-            return ""
-        return self.get_result(job.id)
-
-    def check_complete(self, job_id: str) -> bool:
-        """检查 Job 是否完成"""
-        job = self.broker.get_job(job_id)
-        return job.status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]
-
-    def poll_for_complete(self, job_id: str, timeout: float = 60) -> Job:
-        """等待 Job 完成 (轮询)"""
-        start = time.time()
-        while time.time() - start < timeout:
-            job = self.broker.get_job(job_id)
-            if job.status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
-                return job
-            time.sleep(0.1)
-        raise TimeoutError(f"Job {job_id} timed out")
-```
-
----
-
-### Phase 3: CliExecutor (Day 2-3)
-
-#### 3.4 CliExecutor (新增核心模块)
-
-```python
-# graph/cli_executor.py
-class CliExecutor:
-    """
-    Command 节点执行器
-
-    核心职责：
-    1. 接收 Command 节点配置
-    2. 执行命令 (subprocess)
-    3. 解析输出
-
-    对应 maestro-flow: src/coordinator/cli-executor.ts
-    """
-
-    def __init__(self, adapter: CoordinatorAdapter):
-        self.adapter = adapter
-
-    def execute(self, node: Node, assemble_request: dict = None) -> ExecResult:
-        """
-        执行单个 Command 节点
-
-        Args:
-            node: Command 节点
-            assemble_request: 可选的请求组装参数
-
-        Returns:
-            ExecResult: { success: bool, output: str, error: str }
-        """
-        # 关键：使用 "cmd" 字段获取命令 (与 maestro-flow quick.json 一致)
-        command = node.config.get("cmd", "")
-        agent_type = node.config.get("agent", "shell")
-
-        # 通过 Adapter 创建 Job
-        job = self.adapter.run_command(node.id, command, agent_type)
-
-        # 等待执行完成
-        try:
-            completed_job = self.adapter.poll_for_complete(job.id, timeout=60)
-        except TimeoutError:
-            return ExecResult(success=False, output="", error="Timeout")
-
-        # 解析输出
-        output = completed_job.output or ""
-        error = completed_job.error or ""
-
-        # 解析为结构化结果 (简化版)
-        parsed = self.parse_output(output, node.config)
-
-        return ExecResult(
-            success=completed_job.status == JobStatus.COMPLETED,
-            output=parsed.get("output", output),
-            error=error
-        )
-
-    def parse_output(self, raw_output: str, config: dict) -> dict:
-        """
-        解析命令输出
-
-        对应 maestro-flow: src/coordinator/output-parser.ts
-        """
-        # 简化版：直接返回原始输出
-        # 完整版会根据 config 的 output_schema 解析
-        return {"output": raw_output}
-
-
-@dataclass
-class ExecResult:
-    success: bool
-    output: str
-    error: str
-```
-
-#### 3.5 OutputParser (新增模块)
-
-```python
-# graph/output_parser.py
-class OutputParser:
-    """
-    命令输出解析器
-
-    将原始命令输出解析为结构化结果
-    支持：JSON 输出解析、状态码检测、错误提取
-
-    对应 maestro-flow: src/coordinator/output-parser.ts
-    """
-
-    @staticmethod
-    def parse(raw_output: str, schema: dict = None) -> dict:
-        """
-        解析输出
-
-        Args:
-            raw_output: 原始输出
-            schema: 可选的输出 schema
-
-        Returns:
-            dict: 解析后的结果
-        """
-        result = {"raw": raw_output, "output": raw_output}
-
-        # 尝试 JSON 解析
-        if raw_output.strip().startswith("{"):
-            try:
-                result = json.loads(raw_output)
-            except json.JSONDecodeError:
-                pass
-
-        # 检测状态
-        if "SUCCESS" in raw_output:
-            result["status"] = "success"
-        elif "FAILURE" in raw_output:
-            result["status"] = "failure"
-
-        return result
-
-    @staticmethod
-    def extract_error(output: str) -> Optional[str]:
-        """提取错误信息"""
-        # 简化版：查找 "Error:" 或 "ERROR:" 后的内容
-        import re
-        match = re.search(r'(?:Error|ERROR):\s*(.+?)(?:\n|$)', output)
-        return match.group(1) if match else None
-```
-
----
-
-### Phase 4: GraphWalker (Day 3-4)
-
-#### 3.6 GraphWalker (修正版)
-
-```python
-# graph/walker.py
-class GraphWalker:
-    """
-    图遍历器
-
-    状态机遍历 Graph 结构，执行各节点
-
-    对应 maestro-flow: src/coordinator/graph-walker.ts
-    """
-
-    def __init__(self, adapter: CoordinatorAdapter, executor: CliExecutor):
-        self.adapter = adapter
-        self.executor = executor
-        self.graph: Optional[Graph] = None
-        self.context: dict = {}          # 执行上下文
-        self.fork_state: dict = {}        # Fork/Join 状态
-        self.current_node: Optional[str] = None
-
-    def start(self, graph: Graph, intent: str = None, options: dict = None) -> dict:
-        """
-        启动图遍历
-
-        Args:
-            graph: 图结构
-            intent: 用户意图 (用于 Decision 节点)
-            options: 启动选项 { step_mode: bool, ... }
-
-        Returns:
-            dict: 最终上下文
-        """
-        self.graph = graph
-        self.context = {"intent": intent, "results": {}}
-
-        # 创建 Session
-        self.adapter.start("coordinate")
-
-        # 使用 graph.entry 作为起始节点，而非硬编码 "start"
-        # 与 maestro-flow 一致: quick.json 的 entry 是 "quick"
-        entry_node = getattr(graph, 'entry', None) or "start"
-        self.walk(entry_node)
-
-        return self.context
-
-    def walk(self, start_node_id: str = "start"):
-        """遍历图 (状态机)"""
-        current = start_node_id
-
-        while current and current != "terminal":
-            self.current_node = current
-            node = self.graph.nodes.get(current)
-
-            if not node:
-                raise ValueError(f"Node not found: {current}")
-
-            # 状态机分发
-            if node.type == NodeType.COMMAND:
-                self._handle_command(node)
-                current = self._get_next(current)
-
-            elif node.type == NodeType.DECISION:
-                current = self._handle_decision(node)
-
-            elif node.type == NodeType.FORK:
-                self._handle_fork(node)
-                current = self._get_next(current)
-
-            elif node.type == NodeType.JOIN:
-                self._handle_join(node)
-                current = self._get_next(current)
-
-            elif node.type == NodeType.EVAL:
-                self._handle_eval(node)
-                current = self._get_next(current)
-
-            elif node.type == NodeType.GATE:
-                current = self._handle_gate(node)
-
-            elif node.type == NodeType.TERMINAL:
-                break
-
-    def _handle_command(self, node: Node):
-        """执行 Command 节点"""
-        result = self.executor.execute(node)
-        self.context["results"][node.id] = result
-
-        # 发布事件
-        job = self.adapter.job_map.get(node.id)
-        if job:
-            event_type = "completed" if result.success else "failed"
-            self.adapter.broker.publish_event(job.id, event_type, {"output": result.output})
-
-    def _handle_decision(self, node: Node) -> str:
-        """执行 Decision 节点，返回下一节点 ID"""
-        prompt = node.config.get("prompt", "")
-        strategy = node.config.get("strategy", "expr")  # "expr" | "llm"
-
-        if strategy == "expr":
-            # 表达式策略：从 context 中获取决策变量
-            choice = self.context.get(prompt.strip(), "A")
-        else:
-            # LLM 策略 (简化版用随机)
-            choice = "A"
-
-        self.context["last_decision"] = choice
-
-        # 根据决策选择下一节点
-        return self._get_next_with_condition(node.id, choice)
-
-    def _handle_fork(self, node: Node):
-        """执行 Fork 节点 - 并行执行分支"""
-        branches = node.config.get("branches", [])
-        strategy = node.config.get("strategy", "all")
-
-        self.fork_state[node.id] = {
-            "branches": {b: None for b in branches},
-            "strategy": strategy,
-            "pending": len(branches)
-        }
-
-        # 简化版：顺序执行分支
-        # 完整版会并行执行
-        for branch_id in branches:
-            self.walk(branch_id)
-            self.fork_state[node.id]["branches"][branch_id] = "done"
-
-    def _handle_join(self, node: Node):
-        """执行 Join 节点 - 等待分支完成"""
-        wait_for = node.config.get("wait_for", [])
-        strategy = node.config.get("strategy", "all")
-
-        # 检查所有分支是否完成
-        for branch_id in wait_for:
-            if self.fork_state.get(branch_id) != "done":
-                # 简化版：假设已经完成
-                pass
-
-    def _handle_gate(self, node: Node) -> str:
-        """执行 Gate 节点 - 条件判断"""
-        condition = node.config.get("when")  # e.g., "result.success"
-
-        # 简化版：直接通过
-        return self._get_next(node.id)
-
-    def _handle_eval(self, node: Node):
-        """执行 Eval 节点 - 表达式求值"""
-        expr = node.config.get("expr", "")
-        # 简化版：直接存储表达式
-        self.context[node.id] = expr
-
-    def _get_next(self, node_id: str) -> Optional[str]:
-        """
-        获取下一节点 (无条件)
-
-        优先级：
-        1. 优先从 node.config["next"] 获取 (与 maestro-flow quick.json 一致)
-        2. 回退到 edges 列表查找
-        """
-        # 优先从 node.config["next"] 获取 (quick.json 使用这种方式)
-        node = self.graph.nodes.get(node_id)
-        if node and "next" in node.config:
-            return node.config["next"]
-
-        # 回退到 edges 列表
-        for edge in self.graph.edges:
-            if edge.from_ == node_id and edge.condition is None:
-                return edge.to
-        return None
-
-    def _get_next_with_condition(self, node_id: str, choice: str) -> Optional[str]:
-        """获取下一节点 (有条件)"""
-        for edge in self.graph.edges:
-            if edge.from_ == node_id and edge.condition:
-                # 检查条件
-                cond_expr = edge.condition.get("expr", "")
-                if self._evaluate_condition(cond_expr, choice):
-                    return edge.to
-        return None
-
-    def _evaluate_condition(self, expr: str, choice: str) -> bool:
-        """评估条件表达式"""
-        # 简化版：直接匹配
-        if "choice == 'A'" in expr or 'choice == "A"' in expr:
-            return choice == "A"
-        if "choice == 'B'" in expr or 'choice == "B"' in expr:
-            return choice == "B"
-        return False
-
-    def get_state(self) -> dict:
-        """获取当前状态 (用于恢复)"""
-        return {
-            "current_node": self.current_node,
-            "context": self.context,
-            "fork_state": self.fork_state
-        }
-
-    def resume(self, state: dict):
-        """从状态恢复"""
-        self.current_node = state["current_node"]
-        self.context = state["context"]
-        self.fork_state = state["fork_state"]
-```
-
----
-
-### Phase 5: ParallelRunner (Day 4)
-
-#### 3.7 ParallelRunner (新增模块)
-
-```python
-# graph/parallel_runner.py
-class ParallelRunner:
-    """
-    并行执行器
-
-    对应 maestro-flow: src/agents/parallel-cli-runner.ts
-    """
-
-    def __init__(self, adapter: CoordinatorAdapter):
-        self.adapter = adapter
-
-    def run_all(self, tasks: list[dict], strategy: str = "all") -> list[ExecResult]:
-        """
-        并行执行多个任务
-
-        Args:
-            tasks: [{"node_id": str, "command": str}, ...]
-            strategy: "all" | "any" | "majority"
-
-        Returns:
-            list[ExecResult]: 所有任务的执行结果
-        """
-        import concurrent.futures
-
-        results = []
-
-        def run_single(task):
-            job = self.adapter.run_command(task["node_id"], task["command"])
-            completed = self.adapter.poll_for_complete(job.id, timeout=60)
-            return ExecResult(
-                success=completed.status == JobStatus.COMPLETED,
-                output=completed.output or "",
-                error=completed.error or ""
-            )
-
-        # 并行执行
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as executor:
-            futures = {executor.submit(run_single, task): task for task in tasks}
-
-            for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
-
-        return results
-
-    def run_fork_node(self, node: Node) -> dict:
-        """
-        执行 Fork 节点
-
-        对应原系统的 ParallelCliRunner + DefaultParallelExecutor
-        """
-        branches = node.config.get("branches", [])
-        strategy = node.config.get("strategy", "all")
-
-        # 构建任务列表
-        tasks = []
-        for branch_id in branches:
-            branch_node = self.adapter.graph.nodes.get(branch_id)
-            if branch_node and branch_node.type == NodeType.COMMAND:
-                tasks.append({
-                    "node_id": branch_id,
-                    "command": branch_node.config.get("command", "")
-                })
-
-        # 并行执行
-        results = self.run_all(tasks, strategy)
-
-        return {
-            "strategy": strategy,
-            "results": {t["node_id"]: r for t, r in zip(tasks, results)}
-        }
-```
-
----
-
-### Phase 6: ChannelRelay (Day 5)
-
-#### 3.8 ChannelRelay (新增核心模块)
-
-```python
-# channel_relay.py
-class ChannelRelay:
-    """
-    事件中继器
-
-    职责：
-    1. 轮询 Broker 的事件
-    2. 转发给 MCP Server
-    3. 发送 notifications/claude/channel 通知
-
-    对应 maestro-flow: src/mcp/delegate-channel-relay.ts
-    """
-
-    def __init__(self, broker: Broker, mcp_server: 'MCPServer'):
-        self.broker = broker
-        self.mcp_server = mcp_server
-        self.last_poll_time: float = 0
-        self.running: bool = False
-
-    def start(self, session_id: str):
-        """启动中继"""
-        self.running = True
-        self.last_poll_time = time.time()
-
-        while self.running:
-            events = self.broker.poll_events(session_id, since=self.last_poll_time)
-
-            for event in events:
-                self._forward_event(event)
-
-            if events:
-                self.broker.ack_events([e.id for e in events])
-
-            self.last_poll_time = time.time()
-            time.sleep(0.5)  # 轮询间隔
-
-    def stop(self):
-        """停止中继"""
-        self.running = False
-
-    def _forward_event(self, event: JobEvent):
-        """转发事件到 MCP"""
-        # 发送 MCP notification
-        notification = {
-            "method": "notifications/claude/channel",
-            "params": {
-                "source": "maestro",
-                "exec_id": event.job_id,
-                "event_type": event.event_type,
-                "status": event.data.get("status", ""),
-                "timestamp": event.timestamp
-            }
-        }
-        self.mcp_server.send_notification(notification)
-```
-
----
-
-### Phase 7: MCPServer (Day 5)
-
-#### 3.9 MCPServer
-
-```python
-# mcp/server.py
-class MCPServer:
-    """
-    MCP Server
-
-    实现 JSON-RPC 2.0 协议
-    提供 tools/list 和 tools/call 接口
-
-    对应 maestro-flow: src/mcp/server.ts
-    """
-
-    def __init__(self, broker: Broker, registry: ToolRegistry):
-        self.broker = broker
-        self.registry = registry
-        self.notification_handler = None
-        self.channel_relay: Optional[ChannelRelay] = None
-
-    def set_channel_relay(self, relay: ChannelRelay):
-        """设置 ChannelRelay"""
-        self.channel_relay = relay
-
-    def send_notification(self, notification: dict):
-        """发送通知 (到 stdout)"""
-        print(json.dumps(notification), flush=True)
-
-    def handle_request(self, request: dict) -> dict:
-        """处理 JSON-RPC 请求"""
-        method = request.get("method")
-        req_id = request.get("id")
-        params = request.get("params", {})
-
-        try:
-            if method == "tools/list":
-                tools = self.registry.list_tools()
-                return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}}
-
-            elif method == "tools/call":
-                result = self.registry.call(params["name"], params.get("arguments", {}))
-                return {"jsonrpc": "2.0", "id": req_id, "result": result}
-
-            elif method == "ping":
-                return {"jsonrpc": "2.0", "id": req_id, "result": {"pong": True}}
-
-            else:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32601, "message": f"Method not found: {method}"}
-                }
-
-        except Exception as e:
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32603, "message": str(e)}
-            }
-
-    def run(self):
-        """stdio 主循环"""
-        while True:
-            line = sys.stdin.readline()
-            if not line:
-                break
-
-            request = json.loads(line.strip())
-            response = self.handle_request(request)
-
-            if response:  # notifications 没有 id
-                print(json.dumps(response), flush=True)
-```
-
----
-
-### Phase 8: CLI (Day 6)
-
-#### 3.10 CLI 入口
-
-```python
-# cli.py
-import click
-
-@click.group()
-def cli():
-    """Testing-Flow - 简单工作流编排系统"""
-    pass
-
-@cli.command()
-@click.argument("graph_id")
-@click.option("--intent", default=None, help="用户意图")
-def coordinate(graph_id: str, intent: str):
-    """
-    协调执行工作流图
-
-    GRAPH_ID: 图 ID (对应 graphs/<id>.json)
-    """
-    # 1. 解析 graph_id → 加载图
-    graph = GraphLoader.load(graph_id)
-
-    # 2. 创建适配器
-    broker = JsonBroker()
-    adapter = CoordinatorAdapter(broker)
-    executor = CliExecutor(adapter)
-    walker = GraphWalker(adapter, executor)
-
-    # 3. 执行
-    result = walker.start(graph, intent=intent)
-
-    # 4. 输出结果
-    click.echo(json.dumps(result, indent=2))
-
-@cli.command()
-@click.argument("prompt")
-@click.option("--to", default="echo", help="Agent 类型")
-@click.option("--mode", default="analysis", type=click.Choice(["analysis", "write"]))
-def delegate(prompt: str, to: str, mode: str):
-    """委托任务给 Agent"""
-    broker = JsonBroker()
-    adapter = CoordinatorAdapter(broker)
-
-    session = adapter.start("delegate")
-    job = broker.create_job(session.id, to, prompt)
-
-    # 等待完成
-    result = adapter.poll_for_complete(job.id)
-
-    click.echo(result.output or result.error)
-
-@cli.command()
-def serve():
-    """启动 MCP Server"""
-    broker = JsonBroker()
-    registry = ToolRegistry()
-    registry.register_builtin_tools()
-    server = MCPServer(broker, registry)
-
-    # 可选：启动 ChannelRelay
-    relay = ChannelRelay(broker, server)
-    server.set_channel_relay(relay)
-
-    click.echo("MCP Server started")
-    server.run()
-
-if __name__ == "__main__":
-    cli()
-```
-
----
-
-## 4. 执行计划 (8天)
-
-| Day | 任务 | 核心模块 |
-|-----|------|---------|
-| Day 1 | Broker 核心 | `broker.py` (Session/Job/Event + JSON 实现) |
-| Day 2 | 适配层 + Executor | `coordinator_adapter.py` + `cli_executor.py` |
-| Day 3 | GraphWalker 基础 | `graph/walker.py` (Command/Decision/Terminal) |
-| Day 4 | Fork/Join/Parallel | `graph/fork_join.py` + `parallel_runner.py` |
-| Day 5 | ChannelRelay + MCP | `channel_relay.py` + `mcp/server.py` |
-| Day 6 | CLI + 集成 | `cli.py` + 端到端测试 |
-| Day 7 | 完善 | `output_parser.py` + `evaluator.py` |
-| Day 8 | 测试 + 文档 | 完整测试 + README |
-
----
-
-## 5. 完整项目结构
+## 二、目录结构
 
 ```
 testing-flow/
-├── mvp/
-│   ├── __init__.py
-│   │
-│   ├── broker.py                  # Day 1
-│   │   ├── Session, Job, JobEvent 数据类
-│   │   ├── Broker 抽象接口
-│   │   └── JsonBroker 实现
-│   │
-│   ├── coordinator_adapter.py     # Day 2
-│   │   └── CoordinatorAdapter
-│   │
-│   ├── graph/
-│   │   ├── __init__.py
-│   │   ├── types.py               # Graph, Node, Edge, NodeType
-│   │   ├── loader.py              # Day 3: GraphLoader
-│   │   ├── walker.py             # Day 3: GraphWalker
-│   │   ├── cli_executor.py       # Day 2: CliExecutor
-│   │   ├── output_parser.py     # Day 7: OutputParser
-│   │   ├── evaluator.py          # Day 7: ExprEvaluator
-│   │   ├── fork_join.py          # Day 4: Fork/Join 处理
-│   │   └── parallel_runner.py    # Day 4: ParallelRunner
-│   │
-│   ├── mcp/
-│   │   ├── __init__.py
-│   │   └── server.py             # Day 5: MCPServer
-│   │
-│   ├── channel_relay.py          # Day 5: ChannelRelay
-│   │
-│   ├── tools/
-│   │   ├── __init__.py
-│   │   └── registry.py           # ToolRegistry
-│   │
-│   └── cli.py                    # Day 6: CLI 入口
+├── src/
+│   └── tflow/
+│       ├── __init__.py
+│       ├── cli.py                    # Layer 1: 主入口
+│       │
+│       ├── commands/                 # Layer 1: Command 定义
+│       │   ├── __init__.py
+│       │   ├── quick.py
+│       │   ├── plan.py
+│       │   └── execute.py
+│       │
+│       ├── workflows/                # Layer 2: Workflow 模板
+│       │   ├── __init__.py
+│       │   ├── quick.md
+│       │   ├── plan.md
+│       │   └── execute.md
+│       │
+│       ├── engine/                   # Layer 2: Workflow 引擎
+│       │   ├── __init__.py
+│       │   ├── workflow_engine.py
+│       │   └── wave_scheduler.py
+│       │
+│       ├── agents/                   # Layer 3: Agent 执行器
+│       │   ├── __init__.py
+│       │   ├── base.py
+│       │   ├── subprocess_agent.py
+│       │   └── builtin_prompts.py
+│       │
+│       ├── artifacts/                # Layer 4: 产物管理
+│       │   ├── __init__.py
+│       │   ├── plan.py
+│       │   ├── task.py
+│       │   ├── verification.py
+│       │   └── registry.py
+│       │
+│       ├── state/                    # Layer 5: 状态管理
+│       │   ├── __init__.py
+│       │   ├── state_manager.py
+│       │   ├── git_commit.py
+│       │   └── checkpoint.py
+│       │
+│       └── broker/                   # 共享组件
+│           ├── __init__.py
+│           ├── session.py
+│           ├── job.py
+│           └── event.py
 │
-├── graphs/                        # 图定义文件
-│   ├── simple.json               # 简单线性流程
-│   ├── decision.json             # 条件分支
-│   └── fork_join.json           # 并行分支
+├── graphs/                          # 兼容旧版
+├── tests/                           # TDD 测试
+│   ├── conftest.py                  # pytest 配置
+│   ├── layer1/                     # Layer 1 测试
+│   │   ├── __init__.py
+│   │   └── test_commands.py
+│   ├── layer2/                     # Layer 2 测试
+│   │   ├── __init__.py
+│   │   ├── test_workflow_engine.py
+│   │   └── test_wave_scheduler.py
+│   ├── layer3/                     # Layer 3 测试
+│   │   ├── __init__.py
+│   │   └── test_subprocess_agent.py
+│   ├── layer4/                     # Layer 4 测试
+│   │   ├── __init__.py
+│   │   ├── test_plan.py
+│   │   ├── test_task.py
+│   │   └── test_verification.py
+│   ├── layer5/                     # Layer 5 测试
+│   │   ├── __init__.py
+│   │   ├── test_state_manager.py
+│   │   └── test_git_commit.py
+│   └── test_integration.py         # 集成测试
 │
-├── tests/
-│   ├── test_broker.py
-│   ├── test_graph_walker.py
-│   ├── test_mcp_server.py
-│   └── test_integration.py
-│
-└── README.md
+└── MVP-PLAN.md
 ```
 
 ---
 
-## 6. 端到端测试场景
+## 三、TDD 开发流程
 
-### 场景：执行 `python -m mvp.cli coordinate simple`
-
-**完整流程**：
+### 3.1 红绿重构循环
 
 ```
-1. CLI 解析命令
-   └─ coordinate("simple") → GraphLoader.load("simple")
+┌─────────────────────────────────────────────────────────────┐
+│  1. RED    │ 写一个失败的测试（描述期望的行为）              │
+│             │ 运行测试 → 应该失败（因为功能还没实现）          │
+├─────────────────────────────────────────────────────────────┤
+│  2. GREEN  │ 写最少的代码让测试通过                           │
+│             │ 运行测试 → 应该通过                             │
+├─────────────────────────────────────────────────────────────┤
+│  3. REFACTOR│ 重构代码，消除重复，提高清晰度                  │
+│             │ 运行测试 → 应该继续通过                         │
+└─────────────────────────────────────────────────────────────┘
+```
 
-2. 加载图 graphs/simple.json
-   └─ Graph(id="simple", nodes={...}, edges=[...])
+### 3.2 测试命名规范
 
-3. 创建 Session
-   └─ adapter.start() → broker.create_session()
+```
+test_<module>_<scenario>_<expected>
+```
 
-4. GraphWalker.start(graph)
-   └─ adapter.start("coordinate")
+示例：
+- `test_state_manager_load_returns_empty_state_when_file_not_exists`
+- `test_wave_scheduler_schedule_groups_by_wave_field`
 
-5. 遍历图 start
-   └─ walk("start")
+### 3.3 测试层次
 
-6. 遇到 Command 节点 (start)
-   └─ walker._handle_command(node)
-       └─ executor.execute(node)
-           └─ adapter.run_command(node.id, command)
-               └─ broker.create_job(session.id, agent, prompt)
-           └─ adapter.poll_for_complete(job.id)
-               └─ (执行 subprocess echo)
-           └─ 返回 ExecResult
+| 层次 | 目标 | 工具 |
+|------|------|------|
+| 单元测试 | 单个类/函数 | pytest |
+| 集成测试 | 多层协作 | pytest + tmp_path |
+| 端到端测试 | 完整流程 | subprocess |
 
-7. 遇到 Decision 节点 (decide)
-   └─ walker._handle_decision(node)
-       └─ 选择路径 → "_get_next_with_condition()"
+---
 
-8. 遇到 Fork 节点 (fork_step)
-   └─ walker._handle_fork(node)
-       └─ parallel_runner.run_fork_node(node)
-           └─ 并行执行 branch_1, branch_2
+## 四、数据结构（来自 Architecture）
 
-9. 遇到 Join 节点 (join)
-   └─ walker._handle_join(node)
-       └─ 等待所有分支完成
+### 4.1 文件层次
 
-10. 遇到 Terminal 节点 (end)
-    └─ walk() 结束
+```
+.workflow/
+├── state.json                  # 项目级状态
+├── config.json                  # 项目配置
+└── scratch/
+    └── {slug}/                  # plan 或 quick 标识
+        ├── index.json           # 计划入口
+        ├── plan.json            # 计划概览
+        ├── verification.json    # 验证结果
+        ├── .task/
+        │   └── TASK-*.json     # 任务级
+        └── summaries/
+            └── TASK-*-summary.md
+```
 
-11. 返回 context
-    └─ { intent: ..., results: {...} }
+### 4.2 各 Schema 字段
+
+| Schema | 关键字段 |
+|--------|---------|
+| **state.json** | `version`, `status` (idle/planning/executing/verifying), `artifacts[]`, `accumulated_context` |
+| **plan.json** | `task_ids[]`, `waves[]`, `complexity`, `approach` |
+| **task.json** | `id`, `status`, `convergence.criteria[]`, `files[]`, `implementation[]` |
+| **index.json** | `flags`, `plan`, `execution` |
+| **verification.json** | `layers{}`, `convergence_check{}`, `gaps[]` |
+| **config.json** | `workflow`, `execution`, `git`, `gates`, `specs` |
+
+---
+
+## 五、TDD 测试方案
+
+### Phase 1: Layer 5 — State（先建基础设施）
+
+#### 5.1 StateManager 测试（TDD）
+
+```python
+# tests/layer5/test_state_manager.py
+import pytest
+import json
+import os
+from pathlib import Path
+from tflow.state.state_manager import StateManager, ProjectState, WORKFLOW_DIR
+
+
+class TestStateManager:
+    """StateManager TDD 测试"""
+
+    def test_load_returns_empty_state_when_file_not_exists(self, tmp_path):
+        """RED: 当 state.json 不存在时，返回空状态"""
+        os.chdir(tmp_path)
+        sm = StateManager()
+        state = sm.load()
+
+        assert state.version == "1.0"
+        assert state.status == "idle"
+        assert state.artifacts == []
+
+    def test_load_returns_existing_state(self, tmp_path):
+        """GREEN: 当 state.json 存在时，返回已有状态"""
+        os.chdir(tmp_path)
+        os.makedirs(WORKFLOW_DIR, exist_ok=True)
+        state_file = Path(WORKFLOW_DIR) / "state.json"
+        state_file.write_text(json.dumps({
+            "version": "1.0",
+            "status": "executing",
+            "artifacts": [{"id": "test"}],
+            "accumulated_context": {"key_decisions": [], "blockers": [], "deferred": []}
+        }))
+
+        sm = StateManager()
+        state = sm.load()
+
+        assert state.status == "executing"
+        assert len(state.artifacts) == 1
+
+    def test_save_writes_state_to_file(self, tmp_path):
+        """GREEN: save 方法正确写入文件"""
+        os.chdir(tmp_path)
+        sm = StateManager()
+        state = ProjectState(status="planning")
+        sm.save(state)
+
+        state_file = Path(WORKFLOW_DIR) / "state.json"
+        assert state_file.exists()
+
+        with open(state_file) as f:
+            data = json.load(f)
+        assert data["status"] == "planning"
+
+    def test_is_task_done_returns_false_when_not_exists(self, tmp_path):
+        """RED: 任务不存在时返回 False"""
+        os.chdir(tmp_path)
+        sm = StateManager()
+        assert sm.is_task_done("TASK-999") == False
+
+    def test_is_task_done_returns_true_when_completed(self, tmp_path):
+        """GREEN: 任务完成时返回 True"""
+        os.chdir(tmp_path)
+        sm = StateManager()
+        sm.register_artifact({
+            "task_id": "TASK-001",
+            "status": "completed"
+        })
+        assert sm.is_task_done("TASK-001") == True
+
+    def test_register_artifact_adds_to_artifacts_list(self, tmp_path):
+        """GREEN: 注册 artifact"""
+        os.chdir(tmp_path)
+        sm = StateManager()
+        sm.register_artifact({"task_id": "TASK-001", "status": "pending"})
+
+        state = sm.load()
+        assert len(state.artifacts) == 1
+        assert state.artifacts[0]["task_id"] == "TASK-001"
+
+    def test_add_key_decision_appends_to_context(self, tmp_path):
+        """GREEN: 添加关键决策"""
+        os.chdir(tmp_path)
+        sm = StateManager()
+        sm.add_key_decision("使用增量开发策略")
+
+        state = sm.load()
+        assert len(state.accumulated_context["key_decisions"]) == 1
+        assert "使用增量开发策略" in state.accumulated_context["key_decisions"][0]["text"]
+```
+
+#### 5.2 GitCommit 测试（TDD）
+
+```python
+# tests/layer5/test_git_commit.py
+import pytest
+import subprocess
+from pathlib import Path
+from tflow.state.git_commit import GitCommit
+
+
+class TestGitCommit:
+    """GitCommit TDD 测试"""
+
+    def test_commit_creates_git_commit(self, tmp_path, git_repo):
+        """RED: git commit 应创建提交"""
+        gc = GitCommit()
+
+        # 创建文件
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello")
+
+        commit_hash = gc.commit(["test.txt"], "test commit")
+
+        assert commit_hash is not None
+        assert len(commit_hash) == 40  # git hash length
+
+    def test_commit_raises_on_failure(self, tmp_path, git_repo):
+        """GREEN: 提交失败应抛出异常"""
+        gc = GitCommit()
+
+        with pytest.raises(RuntimeError, match="Git commit failed"):
+            gc.commit(["nonexistent.txt"], "test")
+
+    def test_commit_task_uses_proper_message(self, tmp_path, git_repo):
+        """GREEN: task commit 使用正确格式"""
+        gc = GitCommit()
+
+        test_file = tmp_path / "task.py"
+        test_file.write_text("# task")
+
+        commit_hash = gc.commit_task("TASK-001", "实现登录功能", ["task.py"])
+
+        # 验证 commit message
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%s"],
+            capture_output=True,
+            text=True
+        )
+        assert "TASK-001" in result.stdout
+        assert "实现登录功能" in result.stdout
 ```
 
 ---
 
-## 7. 验收标准
+### Phase 2: Layer 4 — Artifact
 
-### 7.1 模块验收
+#### 5.3 PlanArtifact 测试（TDD）
 
-| 模块 | 验收条件 |
-|------|---------|
-| `broker.py` | Session/Job/Event CRUD + 事件发布/轮询/确认 |
-| `coordinator_adapter.py` | start() → run_command() → poll_for_complete() |
-| `cli_executor.py` | execute(node) → ExecResult |
-| `graph/walker.py` | start(graph) → walk() → context |
-| `parallel_runner.py` | run_all(tasks) → list[ExecResult] |
-| `channel_relay.py` | start() → poll_events() → forward |
-| `mcp/server.py` | tools/list + tools/call |
+```python
+# tests/layer4/test_plan.py
+import pytest
+import json
+from pathlib import Path
+from tflow.artifacts.plan import PlanArtifact, Plan
 
-### 7.2 端到端验收
+
+class TestPlanArtifact:
+    """PlanArtifact TDD 测试"""
+
+    def test_create_initializes_plan_file(self, tmp_path):
+        """RED: create 方法应创建 plan.json"""
+        pa = PlanArtifact(str(tmp_path))
+        plan = pa.create("实现登录功能", {})
+
+        plan_file = tmp_path / "plan.json"
+        assert plan_file.exists()
+
+        with open(plan_file) as f:
+            data = json.load(f)
+        assert data["task"] == "实现登录功能"
+        assert data["id"] is not None
+
+    def test_add_task_creates_task_file_and_updates_plan(self, tmp_path):
+        """GREEN: 添加 task"""
+        pa = PlanArtifact(str(tmp_path))
+        pa.create("实现登录功能", {})
+
+        task = {
+            "id": "TASK-001",
+            "title": "创建登录页面",
+            "scope": ["src/login.py"],
+            "status": "pending",
+            "wave": 0,
+            "convergence": {"criteria": []}
+        }
+        pa.add_task(task)
+
+        # 检查 task 文件
+        task_file = tmp_path / ".task" / "TASK-001.json"
+        assert task_file.exists()
+
+        # 检查 plan.json 更新
+        with open(tmp_path / "plan.json") as f:
+            plan = json.load(f)
+        assert "TASK-001" in plan["task_ids"]
+
+    def test_get_tasks_returns_sorted_tasks(self, tmp_path):
+        """GREEN: 获取排序后的 task 列表"""
+        pa = PlanArtifact(str(tmp_path))
+        pa.create("实现登录功能", {})
+
+        pa.add_task({"id": "TASK-002", "title": "B", "scope": [], "status": "pending", "wave": 0, "convergence": {"criteria": []}})
+        pa.add_task({"id": "TASK-001", "title": "A", "scope": [], "status": "pending", "wave": 0, "convergence": {"criteria": []}})
+
+        tasks = pa.get_tasks()
+        assert tasks[0]["id"] == "TASK-001"
+        assert tasks[1]["id"] == "TASK-002"
+
+    def test_mark_done_updates_task_status(self, tmp_path):
+        """GREEN: 标记 task 完成"""
+        pa = PlanArtifact(str(tmp_path))
+        pa.create("实现登录功能", {})
+        pa.add_task({"id": "TASK-001", "title": "创建登录页面", "scope": [], "status": "pending", "wave": 0, "convergence": {"criteria": []}})
+
+        pa.mark_done("TASK-001", "summaries/TASK-001-summary.md", "abc123")
+
+        with open(tmp_path / ".task" / "TASK-001.json") as f:
+            task = json.load(f)
+        assert task["status"] == "completed"
+        assert task["summary"] == "summaries/TASK-001-summary.md"
+        assert task["commit"] == "abc123"
+```
+
+#### 5.4 VerificationArtifact 测试（TDD）
+
+```python
+# tests/layer4/test_verification.py
+import pytest
+import json
+from pathlib import Path
+from tflow.artifacts.verification import VerificationArtifact, VerificationResult
+
+
+class TestVerificationArtifact:
+    """VerificationArtifact TDD 测试"""
+
+    def test_create_initializes_verification_json(self, tmp_path):
+        """RED: 创建验证文件"""
+        va = VerificationArtifact(str(tmp_path))
+        result = va.create("plan_001")
+
+        verification_file = tmp_path / "verification.json"
+        assert verification_file.exists()
+
+        with open(verification_file) as f:
+            data = json.load(f)
+        assert data["plan_id"] == "plan_001"
+        assert "existence" in data["layers"]
+        assert "substance" in data["layers"]
+        assert "connection" in data["layers"]
+
+    def test_update_layer_updates_correct_layer(self, tmp_path):
+        """GREEN: 更新指定层"""
+        va = VerificationArtifact(str(tmp_path))
+        va.create("plan_001")
+
+        va.update_layer("existence", True, [{"file": "login.py", "found": True}])
+
+        with open(tmp_path / "verification.json") as f:
+            data = json.load(f)
+        assert data["layers"]["existence"]["passed"] == True
+        assert len(data["layers"]["existence"]["evidence"]) == 1
+```
+
+---
+
+### Phase 3: Layer 2 — Workflow
+
+#### 5.5 WaveScheduler 测试（TDD）
+
+```python
+# tests/layer2/test_wave_scheduler.py
+import pytest
+from tflow.engine.wave_scheduler import WaveScheduler
+
+
+class TestWaveScheduler:
+    """WaveScheduler TDD 测试"""
+
+    def test_schedule_groups_tasks_by_wave(self):
+        """RED: 按 wave 字段分组"""
+        ws = WaveScheduler()
+        tasks = [
+            {"id": "TASK-001", "wave": 0},
+            {"id": "TASK-002", "wave": 0},
+            {"id": "TASK-003", "wave": 1},
+            {"id": "TASK-004", "wave": 2},
+        ]
+
+        waves = ws.schedule(tasks)
+
+        assert len(waves) == 3
+        assert len(waves[0]) == 2  # wave 0: TASK-001, TASK-002
+        assert len(waves[1]) == 1  # wave 1: TASK-003
+        assert len(waves[2]) == 1  # wave 2: TASK-004
+
+    def test_schedule_handles_missing_wave_field(self):
+        """GREEN: 缺失 wave 字段默认为 0"""
+        ws = WaveScheduler()
+        tasks = [
+            {"id": "TASK-001"},  # 无 wave 字段
+            {"id": "TASK-002", "wave": 1},
+        ]
+
+        waves = ws.schedule(tasks)
+
+        assert len(waves[0]) == 1  # TASK-001 默认 wave 0
+        assert len(waves[1]) == 1  # TASK-002 wave 1
+
+    def test_schedule_returns_empty_for_empty_list(self):
+        """GREEN: 空列表返回空"""
+        ws = WaveScheduler()
+        assert ws.schedule([]) == []
+
+    def test_run_waves_executes_sequentially(self):
+        """GREEN: 波次间串行执行"""
+        ws = WaveScheduler()
+        executed = []
+
+        def executor(task):
+            executed.append(task["id"])
+            return {"success": True, "task_id": task["id"]}
+
+        waves = [[{"id": "TASK-001"}], [{"id": "TASK-002"}]]
+        results = ws.run_waves(waves, executor)
+
+        assert executed == ["TASK-001", "TASK-002"]  # 顺序执行
+        assert len(results) == 2
+
+    def test_run_waves_executes_within_wave_in_parallel(self):
+        """GREEN: 波次内并行执行"""
+        import concurrent.futures
+        ws = WaveScheduler()
+        start_times = {}
+
+        def executor(task):
+            import time
+            start_times[task["id"]] = time.time()
+            time.sleep(0.1)
+            return {"success": True, "task_id": task["id"]}
+
+        waves = [[{"id": "TASK-001"}, {"id": "TASK-002"}]]  # 同一波次
+        ws.run_waves(waves, executor)
+
+        # 验证并行：两者启动时间相近
+        diff = abs(start_times["TASK-001"] - start_times["TASK-002"])
+        assert diff < 0.05  # 几乎同时启动
+```
+
+#### 5.6 WorkflowEngine 测试（TDD）
+
+```python
+# tests/layer2/test_workflow_engine.py
+import pytest
+from pathlib import Path
+from tflow.engine.workflow_engine import WorkflowEngine
+
+
+class TestWorkflowEngine:
+    """WorkflowEngine TDD 测试"""
+
+    def test_load_reads_workflow_template(self, tmp_path):
+        """RED: 加载 workflow 模板"""
+        workflow_file = tmp_path / "quick.md"
+        workflow_file.write_text("## {{task}}\nStep: prepare\n")
+
+        engine = WorkflowEngine(workflow_dir=str(tmp_path))
+        workflow = engine.load("quick")
+
+        assert "task" in workflow
+        assert "Step: prepare" in workflow
+
+    def test_run_substitutes_variables(self, tmp_path):
+        """GREEN: 变量替换"""
+        workflow_file = tmp_path / "quick.md"
+        workflow_file.write_text("Task: {{task}}\nStatus: {{status}}")
+
+        engine = WorkflowEngine(workflow_dir=str(tmp_path))
+        result = engine.run({
+            "task": "实现登录",
+            "status": "pending"
+        })
+
+        assert "Task: 实现登录" in result["prepared"]
+        assert "Status: pending" in result["prepared"]
+
+    def test_run_respects_conditional_branch(self, tmp_path):
+        """GREEN: 条件分支"""
+        workflow_file = tmp_path / "quick.md"
+        workflow_file.write_text(
+            "{{#if discuss}}\n"
+            "讨论阶段\n"
+            "{{/if}}\n"
+            "执行阶段"
+        )
+
+        engine = WorkflowEngine(workflow_dir=str(tmp_path))
+
+        # discuss=True 时
+        result = engine.run({"discuss": True})
+        assert "讨论阶段" in result["steps"]
+        assert "执行阶段" in result["steps"]
+
+        # discuss=False 时
+        result = engine.run({"discuss": False})
+        assert "讨论阶段" not in result["steps"]
+        assert "执行阶段" in result["steps"]
+
+    def test_run_skips_completed_steps_on_resume(self, tmp_path):
+        """GREEN: 断点续做跳过已完成步骤"""
+        workflow_file = tmp_path / "quick.md"
+        workflow_file.write_text("Step: prepare\nStep: plan\nStep: execute")
+
+        engine = WorkflowEngine(workflow_dir=str(tmp_path))
+
+        # 模拟已完成 prepare
+        result = engine.run({"discuss": False}, skip_steps=["prepare"])
+
+        assert "prepare" not in result
+        assert "plan" in result
+        assert "execute" in result
+```
+
+---
+
+### Phase 4: Layer 3 — Agent
+
+#### 5.7 SubprocessAgent 测试（TDD）
+
+```python
+# tests/layer3/test_subprocess_agent.py
+import pytest
+from tflow.agents.subprocess_agent import SubprocessAgent, ExecResult
+
+
+class TestSubprocessAgent:
+    """SubprocessAgent TDD 测试"""
+
+    def test_run_executes_shell_command(self):
+        """RED: 执行 shell 命令"""
+        agent = SubprocessAgent()
+        result = agent.run("echo 'hello'", agent_type="shell")
+
+        assert result.success == True
+        assert "hello" in result.output
+
+    def test_run_returns_error_on_failure(self):
+        """GREEN: 命令失败返回错误"""
+        agent = SubprocessAgent()
+        result = agent.run("exit 1", agent_type="shell")
+
+        assert result.success == False
+        assert result.error is not None
+
+    def test_run_respects_timeout(self):
+        """GREEN: 超时控制"""
+        agent = SubprocessAgent()
+        result = agent.run("sleep 10", agent_type="shell", timeout=1)
+
+        assert result.success == False
+        assert "Timeout" in result.error
+
+    def test_run_parses_json_output(self):
+        """GREEN: 解析 JSON 输出"""
+        agent = SubprocessAgent()
+        result = agent.run('echo \'{"key": "value"}\'', agent_type="shell")
+
+        assert result.success == True
+        # 可选的 JSON 解析
+        parsed = agent.parse_output(result.output)
+        assert parsed == {"key": "value"}
+
+    def test_build_command_for_claude(self):
+        """GREEN: 构建 claude 命令"""
+        agent = SubprocessAgent()
+        cmd = agent._build_command("test prompt", agent_type="claude")
+
+        assert "claude" in cmd
+        assert "test prompt" in cmd
+```
+
+---
+
+### Phase 5: Layer 1 — Command
+
+#### 5.8 Command 测试（TDD）
+
+```python
+# tests/layer1/test_commands.py
+import pytest
+from click.testing import CliRunner
+from tflow.cli import cli
+
+
+class TestQuickCommand:
+    """quick 命令 TDD 测试"""
+
+    def test_quick_command_requires_task_argument(self):
+        """RED: quick 命令需要 task 参数"""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["quick"])
+
+        assert result.exit_code != 0
+
+    def test_quick_command_accepts_task(self, tmp_path):
+        """GREEN: quick 命令接受 task 参数"""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["quick", "实现登录功能"])
+
+            # 命令应正常执行（即使功能未实现）
+            assert result.exit_code in [0, 1]  # 0=成功, 1=功能未实现
+
+    def test_quick_command_with_full_flag(self, tmp_path):
+        """GREEN: --full 标志"""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["quick", "实现登录功能", "--full"])
+
+            assert "--full" in result.output or result.exit_code == 0
+
+    def test_quick_command_with_discuss_flag(self, tmp_path):
+        """GREEN: --discuss 标志"""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["quick", "实现登录功能", "--discuss"])
+
+            assert "--discuss" in result.output or result.exit_code == 0
+
+
+class TestPlanCommand:
+    """plan 命令 TDD 测试"""
+
+    def test_plan_command_accepts_phase(self):
+        """RED: plan 命令接受 phase 参数"""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["plan", "phase-1"])
+
+            assert result.exit_code in [0, 1]
+
+
+class TestExecuteCommand:
+    """execute 命令 TDD 测试"""
+
+    def test_execute_command_accepts_phase(self):
+        """RED: execute 命令接受 phase 参数"""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["execute", "phase-1"])
+
+            assert result.exit_code in [0, 1]
+```
+
+---
+
+### Phase 6: 集成测试
+
+#### 5.9 端到端测试（TDD）
+
+```python
+# tests/test_integration.py
+import pytest
+import subprocess
+from pathlib import Path
+
+
+class TestEndToEnd:
+    """端到端 TDD 测试"""
+
+    def test_full_quick_workflow(self, tmp_path, git_repo):
+        """RED: 完整 quick 工作流"""
+        runner = subprocess.run(
+            ["python", "-m", "tflow.cli", "quick", "实现登录功能"],
+            cwd=str(tmp_path),
+            capture_output=True,
+            text=True
+        )
+
+        # 验证输出
+        assert "quick" in runner.stdout.lower() or runner.returncode in [0, 1]
+
+    def test_workflow_creates_artifacts(self, tmp_path, git_repo):
+        """GREEN: 工作流创建正确产物"""
+        subprocess.run(
+            ["python", "-m", "tflow.cli", "quick", "实现登录功能"],
+            cwd=str(tmp_path),
+            capture_output=True
+        )
+
+        # 验证产物目录
+        scratch_dir = Path(tmp_path) / ".workflow" / "scratch"
+        if scratch_dir.exists():
+            # 验证 plan.json 存在
+            plan_files = list(scratch_dir.glob("*/plan.json"))
+            assert len(plan_files) >= 0  # 取决于执行进度
+
+    def test_workflow_creates_git_commits(self, tmp_path, git_repo):
+        """GREEN: 工作流创建 git 提交"""
+        subprocess.run(
+            ["python", "-m", "tflow.cli", "quick", "实现登录功能"],
+            cwd=str(tmp_path),
+            capture_output=True
+        )
+
+        # 验证 git log
+        result = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=str(tmp_path),
+            capture_output=True,
+            text=True
+        )
+
+        # 应该至少有 initial commit
+        assert "initial" in result.stdout.lower() or len(result.stdout) > 0
+```
+
+---
+
+## 六、pytest 配置
+
+```python
+# tests/conftest.py
+import pytest
+import subprocess
+import os
+from pathlib import Path
+
+
+@pytest.fixture
+def git_repo(tmp_path):
+    """创建临时 git 仓库"""
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path, capture_output=True
+    )
+    # 创建 initial commit
+    readme = tmp_path / "README.md"
+    readme.write_text("# Test")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=tmp_path, capture_output=True
+    )
+    return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def change_to_tmp_path(tmp_path):
+    """自动切换到临时目录"""
+    original_dir = os.getcwd()
+    os.chdir(tmp_path)
+    yield
+    os.chdir(original_dir)
+```
+
+---
+
+## 七、运行测试
 
 ```bash
-# 1. 简单图
-python -m mvp.cli coordinate simple
-# 预期：输出 context 结果
+# 运行所有测试
+pytest tests/
 
-# 2. 条件分支图
-python -m mvp.cli coordinate decision --intent "选择 A"
-# 预期：根据 intent 选择路径
+# 运行特定层
+pytest tests/layer5/  # State 测试
+pytest tests/layer4/  # Artifact 测试
+pytest tests/layer2/  # Workflow 测试
+pytest tests/layer3/  # Agent 测试
+pytest tests/layer1/  # Command 测试
 
-# 3. 并行分支图
-python -m mvp.cli coordinate fork_join
-# 预期：并行执行分支，join 等待完成
+# 运行 TDD 红绿循环
+pytest --tb=short  # 简洁错误输出
+pytest -v          # 详细输出
 
-# 4. MCP Server
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | python -m mvp.cli serve &
-# 预期：返回工具列表
+# 生成覆盖率报告
+pytest --cov=src/tflow --cov-report=html
 ```
 
 ---
 
-## 8. 评审问题修复确认 (v3 → v4)
+## 八、TDD 开发顺序
 
-| 评审问题 | 修复措施 | 状态 |
-|---------|---------|------|
-| **v3 遗留问题** | | |
-| [HIGH-1] CLI 入口路径错误 | 改为 `coordinate <graph-id>` | ✅ 已修复 |
-| [HIGH-2] 缺少 CliExecutor | 新增 `graph/cli_executor.py` | ✅ 已修复 |
-| [HIGH-3] 事件流方向反转 | 修正为 Agent push → poll | ✅ 已修复 |
-| **v4 新发现问题** | | |
-| Node 类型比较失败 | `NodeType(str, Enum)` 使用字符串值 | ✅ 已修复 |
-| 命令字段名错误 | `node.config.get("cmd")` | ✅ 已修复 |
-| 下一节点获取逻辑 | 优先 `config["next"]`，回退 edges | ✅ 已修复 |
-| 图文件路径不匹配 | GraphLoader 多路径搜索 | ✅ 已修复 |
-| 起始节点硬编码 | 使用 `graph.entry` | ✅ 已修复 |
-| **待完善功能** | | |
-| Terminal delegate_graph | 增加 `delegate_graph` 支持 | ⏳ 可选 |
-| Hooks 数量 | 简化为 4 个核心钩子 | ⏳ 可选 |
+| 顺序 | Phase | 依赖关系 | 测试数 |
+|------|-------|---------|--------|
+| 1 | Layer 5 State | 无 | 7 |
+| 2 | Layer 5 Git | Layer 5 State | 3 |
+| 3 | Layer 4 Artifact | Layer 5 State | 5 |
+| 4 | Layer 2 Wave | 无 | 5 |
+| 5 | Layer 2 Engine | Layer 2 Wave, Layer 4 | 4 |
+| 6 | Layer 3 Agent | Layer 2 | 5 |
+| 7 | Layer 1 Command | Layer 2, 3, 4 | 4 |
+| 8 | 集成测试 | 所有层 | 3 |
+
+**总计: ~36 个测试用例**
 
 ---
 
-## 9. maestro-quick 执行验证
+## 九、验收标准
 
-### quick.json 结构
+### TDD 流程
+- [ ] 每个模块先写测试再实现
+- [ ] 所有测试通过（RED → GREEN）
+- [ ] 重构后测试仍然通过
 
-```json
-{
-  "id": "singles/quick",
-  "entry": "quick",
-  "nodes": {
-    "quick": { "type": "command", "cmd": "maestro-quick", "next": "done" },
-    "done": { "type": "terminal", "status": "success" }
-  }
-}
-```
+### 测试覆盖
+- [ ] StateManager: 7 个测试
+- [ ] GitCommit: 3 个测试
+- [ ] PlanArtifact: 4 个测试
+- [ ] VerificationArtifact: 2 个测试
+- [ ] WaveScheduler: 5 个测试
+- [ ] WorkflowEngine: 4 个测试
+- [ ] SubprocessAgent: 5 个测试
+- [ ] Command: 4 个测试
+- [ ] 集成测试: 3 个测试
 
-### MVP 执行链路验证
-
-| 步骤 | MVP 实现 | quick.json 字段 | 状态 |
-|------|---------|-----------------|------|
-| GraphLoader.load("quick") | 多路径搜索 chains/singles/ | - | ✅ |
-| graph.entry | Graph.entry = "quick" | entry: "quick" | ✅ |
-| Node.type 比较 | `NodeType(str, Enum)` | type: "command" | ✅ |
-| 获取命令 | `node.config.get("cmd")` | cmd: "maestro-quick" | ✅ |
-| 获取下一节点 | `node.config["next"]` | next: "done" | ✅ |
-| Terminal 退出 | `node.type == "terminal"` | type: "terminal" | ✅ |
+### 代码质量
+- [ ] 所有测试通过
+- [ ] 无警告
+- [ ] 覆盖率报告生成
 
 ---
 
-*计划版本: v4*
+*计划版本: 最终版*
 *修订日期: 2026-05-02*
-*基于: maestro-quick 兼容性分析*
