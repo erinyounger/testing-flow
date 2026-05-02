@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "status": "executing",
+  "artifacts": [],
+  "accumulated_context": {
+    "key_decisions": [],
+    "blockers": [],
+    "deferred": []
+  }
+}
