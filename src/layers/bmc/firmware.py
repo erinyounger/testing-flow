@@ -27,28 +27,29 @@ class FirmwareTests:
 
         try:
             # Simulate flash progress
+            progress_steps = []
             flash_progress = 0
-            progress_updates = []
 
-            while flash_progress <= 100:
-                progress_updates.append(flash_progress)
+            while flash_progress < 100:
+                progress_steps.append(flash_progress)
                 if flash_progress < 30:
                     flash_progress += 10
                 elif flash_progress < 80:
                     flash_progress += 20
                 else:
                     flash_progress = 100
+            progress_steps.append(100)
 
-            if 100 not in progress_updates:
+            if 100 not in progress_steps:
                 result["errors"].append("Flash did not reach 100%")
                 return result
 
             result["passed"] = True
             result["data"] = {
-                "flash_progress_percent": progress_updates[-1],
-                "progress_updates": len(progress_updates),
+                "flash_progress_percent": progress_steps[-1],
+                "progress_steps": len(progress_steps),
             }
-            self._logger.info(f"Flash progress tracking passed: {progress_updates[-1]}%")
+            self._logger.info(f"Flash progress tracking passed: {progress_steps[-1]}%")
 
         except Exception as e:
             result["errors"].append(str(e))
