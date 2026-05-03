@@ -1,7 +1,7 @@
 ---
 name: tflow-standard
 description: 使用内置 Claude Agent 执行通用任务（Plan → Execute → Verify）
-argument-hint: "<任务描述> [--verify] [--full]"
+argument-hint: "<任务描述> [--full] [--discuss]"
 allowed-tools:
   - Read
   - Write
@@ -10,6 +10,8 @@ allowed-tools:
   - Glob
   - Grep
   - Agent
+  - Task
+  - AskUserQuestion
 ---
 
 <purpose>
@@ -24,8 +26,8 @@ allowed-tools:
 $ARGUMENTS
 
 解析参数：
-- `--verify` 标志 — 启用验证步骤（三层检查：存在性/实质性/连接性）
-- `--full` 标志 — 启用计划->检查和执行后验证
+- `--full` 标志 — 启用计划检查（最多2次迭代）和执行后验证
+- `--discuss` 标志 — 规划前的轻量级决策提取，识别灰区进行交互式讨论
 - 其余文本作为任务描述
 </context>
 

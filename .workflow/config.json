@@ -1,8 +1,0 @@
-{
-  "executionMode": "sequential",
-  "verificationLevel": "basic",
-  "notifications": "none",
-  "stateTracking": "enabled",
-  "resultArchival": "manual",
-  "approvalFlow": "auto"
-}
