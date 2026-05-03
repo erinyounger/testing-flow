@@ -1,0 +1,90 @@
+{
+  "phase": "standard-os-2026-05-03",
+  "status": "pass",
+  "layers": {
+    "existence": {
+      "pass": true,
+      "checks": [
+        {"check": "src/core/os_detection/__init__.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/os_detection/__init__.py"},
+        {"check": "src/core/os_detection/detector.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/os_detection/detector.py with OSDetector class (240 lines)"},
+        {"check": "src/core/os_detection/registry.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/os_detection/registry.py with OSRegistry class (108 lines)"},
+        {"check": "src/core/os_detection/models.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/os_detection/models.py with OSInfo and DetectionResult dataclasses (70 lines)"},
+        {"check": "src/core/os_detection/config.yaml exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/os_detection/config.yaml with 11 domestic OS distributions"},
+        {"check": "src/core/cmd_adapter/__init__.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/cmd_adapter/__init__.py"},
+        {"check": "src/core/cmd_adapter/adapter.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/cmd_adapter/adapter.py with CommandAdapter ABC and CommandRegistry (219 lines)"},
+        {"check": "src/core/cmd_adapter/commands.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/cmd_adapter/commands.py with os_cmd unified interface (128 lines)"},
+        {"check": "src/core/cmd_adapter/commands.yaml exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/cmd_adapter/commands.yaml with OS command mappings"},
+        {"check": "src/core/cmd_adapter/adapters/linux.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/cmd_adapter/adapters/linux.py with GenericLinuxAdapter (201 lines)"},
+        {"check": "src/core/cmd_adapter/adapters/domestic.py exists", "pass": true, "evidence": "File exists at /home/eeric/code/testing-flow/src/core/cmd_adapter/adapters/domestic.py with DomesticOSAdapter (58 lines)"},
+        {"check": "tests/test_os_detection.py exists", "pass": true, "evidence": "File exists with 16 test cases covering OS detection"},
+        {"check": "tests/test_cmd_adapter.py exists", "pass": true, "evidence": "File exists with 22 test cases covering command adapter"}
+      ]
+    },
+    "substance": {
+      "pass": true,
+      "checks": [
+        {"check": "OSDetector.detect() implements hybrid detection priority", "pass": true, "evidence": "detector.py:61-112 - Priority order: explicit config (1.0) > os_release (0.95) > uname (0.7) > unknown"},
+        {"check": "OSRegistry.load_config() parses YAML correctly", "pass": true, "evidence": "registry.py:70-103 - Loads os_distributions from YAML, registers each OSInfo"},
+        {"check": "OSDetector auto-discovers unknown distributions", "pass": true, "evidence": "detector.py:129-147 - _detect_from_os_release() auto-registers unknown distros with inferred family/package_manager"},
+        {"check": "CommandAdapter.execute() routes to appropriate handler", "pass": true, "evidence": "linux.py:34-75 - command_map routes cmd_name to _cmd_* methods"},
+        {"check": "CommandRegistry routes to OS-specific adapter", "pass": true, "evidence": "adapter.py:193-214 - execute() calls get_adapter().execute() for current OS"},
+        {"check": "DomesticOSAdapter extends GenericLinuxAdapter", "pass": true, "evidence": "domestic.py:11-57 - Adds deepin_version, kylin_version, anolis_version, startos_info commands"},
+        {"check": "os_cmd() unified interface exists and works", "pass": true, "evidence": "commands.py:93-110 - os_cmd() routes to registry.execute()"},
+        {"check": "YAML config defines domestic OS command overrides", "pass": true, "evidence": "commands.yaml:1-67 - Maps ubuntu-kylin, deepin, anolis, startos, openeuler, uniontech, kylin to specific commands"}
+      ]
+    },
+    "connection": {
+      "pass": true,
+      "checks": [
+        {"check": "os_detection module imports resolve correctly", "pass": true, "evidence": "detector.py imports from os_detection.models and os_detection.registry"},
+        {"check": "cmd_adapter module imports resolve correctly", "pass": true, "evidence": "commands.py imports from cmd_adapter.adapter, cmd_adapter.adapters.linux, cmd_adapter.adapters.domestic, os_detection.detector, os_detection.registry"},
+        {"check": "DomesticOSAdapter extends GenericLinuxAdapter", "pass": true, "evidence": "domestic.py:11 - class DomesticOSAdapter(GenericLinuxAdapter)"},
+        {"check": "All test files import correctly", "pass": true, "evidence": "pytest tests/test_os_detection.py tests/test_cmd_adapter.py -v: 38 passed"},
+        {"check": "pytest --collect-only discovers all 193 tests", "pass": true, "evidence": "pytest --collect-only shows 193 items collected"}
+      ]
+    },
+    "convergence_check": {
+      "TASK-001": {
+        "status": "pass",
+        "criteria": [
+          {"criterion": "OS detection returns correct OS family for known distributions via /etc/os-release", "pass": true, "evidence": "detector.py:114-147 - _detect_from_os_release() reads /etc/os-release and looks up in registry"},
+          {"criterion": "Config file overrides dynamic detection when OS is explicitly specified", "pass": true, "evidence": "detector.py:68-78 - set_explicit_os() returns source='config' with confidence=1.0"},
+          {"criterion": "Unknown distribution triggers auto-discovery and registers with detected info", "pass": true, "evidence": "detector.py:129-147 - Auto-registers unknown distros with _infer_family() and _infer_package_manager()"},
+          {"criterion": "Registry lookup by distro ID returns correct OSInfo", "pass": true, "evidence": "registry.py:38-48 - lookup() returns OSInfo from _registry dict"},
+          {"criterion": "pytest tests/test_os_detection.py -v passes", "pass": true, "evidence": "16 tests passed in 0.06s"}
+        ]
+      },
+      "TASK-002": {
+        "status": "pass",
+        "criteria": [
+          {"criterion": "os_cmd('info') returns structured system info on any registered OS", "pass": true, "evidence": "commands.py:93-110 + linux.py:77-108 - os_cmd('info') returns JSON with os, hostname, kernel, architecture"},
+          {"criterion": "Command adapter registry correctly routes to OS-specific implementation", "pass": true, "evidence": "adapter.py:170-181 - get_adapter() returns adapter for current OS from _adapters dict"},
+          {"criterion": "YAML config can override default command mappings for any OS", "pass": true, "evidence": "commands.yaml:7-51 - command_overrides maps OS-specific commands; adapter.py:183-191 - load_command_overrides() stores overrides"},
+          {"criterion": "Unregistered OS falls back to generic Linux adapter", "pass": true, "evidence": "adapter.py:150-158 + 179-180 - set_generic_adapter() sets fallback; get_adapter() returns generic if OS not found"},
+          {"criterion": "pytest tests/test_cmd_adapter.py -v passes", "pass": true, "evidence": "22 tests passed in 0.06s"}
+        ]
+      }
+    },
+    "must_haves": {
+      "truths": [
+        {"claim": "OS识别机制采用混合模式: 配置文件为主，动态探测为辅", "verified": true, "evidence": "detector.py:68-78 (config primary, confidence 1.0) vs detector.py:80-98 (dynamic detection secondary)"},
+        {"claim": "测试用例抽象层级为场景层抽象: YAML/JSON配置驱动", "verified": true, "evidence": "commands.yaml drives command mappings; commands.py:os_cmd() is unified interface"},
+        {"claim": "OS特定适配扩展点为命令适配层: 统一命令接口", "verified": true, "evidence": "CommandAdapter ABC with execute(cmd_name, **kwargs); os_cmd('info') unified interface"}
+      ],
+      "artifacts": [
+        {"path": "src/core/os_detection/config.yaml", "exists": true, "substantial": true, "evidence": "Contains 11 OS distributions: ubuntu-kylin, deepin, anolis, startos, openeuler, uniontech, kylin, ubuntu, debian, centos, fedora"},
+        {"path": "src/core/cmd_adapter/commands.yaml", "exists": true, "substantial": true, "evidence": "Contains OS-specific command overrides and generic defaults"},
+        {"path": "src/core/os_detection/detector.py", "exists": true, "substantial": true, "evidence": "240 lines with hybrid detection logic"},
+        {"path": "src/core/cmd_adapter/adapter.py", "exists": true, "substantial": true, "evidence": "219 lines with CommandAdapter ABC and CommandRegistry"},
+        {"path": "src/core/cmd_adapter/adapters/domestic.py", "exists": true, "substantial": true, "evidence": "58 lines with DomesticOSAdapter for Chinese OS variants"}
+      ],
+      "key_links": [
+        {"from": "commands.py:os_cmd()", "to": "CommandRegistry.execute()", "connected": true},
+        {"from": "CommandRegistry", "to": "CommandAdapter (GenericLinuxAdapter, DomesticOSAdapter)", "connected": true},
+        {"from": "OSDetector", "to": "OSRegistry", "connected": true},
+        {"from": "OSDetector.detect()", "to": "commands.set_os()", "connected": false, "note": "Integration exists via init_with_os_detection() in commands.py:73-79"}
+      ]
+    },
+    "gaps": []
+  }
+}
