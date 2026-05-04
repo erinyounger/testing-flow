@@ -1,0 +1,16 @@
+{
+  "status": "idle",
+  "artifacts": [],
+  "initialized_at": "2026-05-05T00:00:00",
+  "last_updated": "2026-05-05T00:45:00",
+  "standard_tasks": [
+    {
+      "id": "standard-develop-tflow-2026-05-05",
+      "description": "开发 tflow Python 后端核心模块",
+      "completed_at": "2026-05-05T00:45:00",
+      "directory": ".workflow/scratch/standard-develop-tflow-2026-05-05",
+      "verified": "passed",
+      "tasks": ["TASK-001", "TASK-002", "TASK-003"]
+    }
+  ]
+}

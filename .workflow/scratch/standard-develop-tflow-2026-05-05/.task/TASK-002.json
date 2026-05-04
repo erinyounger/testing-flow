@@ -1,71 +1,53 @@
 {
   "id": "TASK-002",
-  "title": "实现 workflow 引擎模块",
-  "description": "创建 workflow/engine.py (WorkflowEngine 状态机), workflow/state.py (WorkflowState), workflow/persistence.py (会话持久化)。WorkflowEngine 实现线性状态机：PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED。",
+  "title": "实现 AgentExecutor 统一执行器",
+  "description": "实现核心执行器 AgentExecutor，协调适配器选择、进程启动、输出收集、事件发布。参考 Maestro 的 CliAgentRunner 设计，支持多 Agent 类型(Claude, Gemini, Qwen, Codex, OpenCode)和两种后端模式(Direct, Terminal)",
   "type": "feature",
   "priority": "high",
   "effort": "medium",
   "action": "Implement",
-  "scope": "src/tflow/workflow",
-  "focus_paths": [
-    "src/tflow/workflow/__init__.py",
-    "src/tflow/workflow/engine.py",
-    "src/tflow/workflow/state.py",
-    "src/tflow/workflow/persistence.py"
-  ],
+  "scope": "src/tflow/core",
+  "focus_paths": ["src/tflow/core/"],
   "depends_on": [],
   "convergence": {
     "criteria": [
-      "src/tflow/workflow/engine.py 包含 'class WorkflowEngine' 定义",
-      "src/tflow/workflow/state.py 包含 'class WorkflowState' 定义和 WorkflowStatus 枚举",
-      "src/tflow/workflow/persistence.py 包含会话持久化方法",
-      "python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print(\"Workflow imports OK\")' 执行成功",
-      "WorkflowEngine 状态机支持状态转换：IDLE → PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED"
+      "core/executor.py 包含 AgentExecutor 类",
+      "AgentExecutor.run() 方法可接受 RunOptions 并返回 ExecutionResult",
+      "支持 AgentType.CLAUDE_CODE, GEMINI, QWEN, CODEX, OPENCODE",
+      "python -c 'from tflow.core.executor import AgentExecutor, AgentType, RunOptions' 无报错"
     ],
-    "verification": "python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print(\"Workflow imports OK\")'"
+    "verification": "python -c 'from tflow.core.executor import AgentExecutor, AgentType, RunOptions; e = AgentExecutor(); print(\"OK\")'"
   },
   "files": [
-    {
-      "path": "src/tflow/workflow/__init__.py",
-      "action": "create",
-      "target": "workflow module exports"
-    },
-    {
-      "path": "src/tflow/workflow/state.py",
-      "action": "create",
-      "target": "WorkflowState dataclass 和 WorkflowStatus 枚举"
-    },
-    {
-      "path": "src/tflow/workflow/engine.py",
-      "action": "create",
-      "target": "WorkflowEngine 状态机实现"
-    },
-    {
-      "path": "src/tflow/workflow/persistence.py",
-      "action": "create",
-      "target": "会话持久化实现"
-    }
+    {"path": "src/tflow/core/__init__.py", "action": "create", "target": "模块导出"},
+    {"path": "src/tflow/core/executor.py", "action": "create", "target": "AgentExecutor, RunOptions, ExecutionResult, AgentProcess"}
   ],
   "implementation": [
-    "创建 workflow/__init__.py - 导出 WorkflowEngine, WorkflowState, WorkflowStatus",
-    "创建 workflow/state.py - WorkflowStatus 枚举 (IDLE, PARSING, VALIDATING, PLANNING, EXECUTING, VERIFYING, COMPLETING, COMPLETED, FAILED, PAUSED) 和 WorkflowState 数据类",
-    "创建 workflow/engine.py - WorkflowEngine 状态机类，实现状态转换逻辑和事件发布",
-    "创建 workflow/persistence.py - Workflow 会话持久化，使用 JSONL 存储"
+    "创建 src/tflow/core/__init__.py 导出 AgentExecutor 等",
+    "实现 AgentType 枚举 (CLAUDE_CODE, GEMINI, QWEN, CODEX, OPENCODE)",
+    "实现 ExecutionMode 枚举 (ANALYSIS, WRITE)",
+    "实现 BackendType 枚举 (DIRECT, TERMINAL)",
+    "实现 RunOptions dataclass (prompt, tool, mode, work_dir, model, backend 等)",
+    "实现 ExecutionResult dataclass (exec_id, exit_code, output, success, duration_ms)",
+    "实现 AgentProcess 类封装 subprocess.Popen",
+    "实现 AgentExecutor 类: run() 同步执行, run_async() 异步执行",
+    "实现 _build_command() 构建各 Agent 特定命令行",
+    "实现 _assemble_prompt() 组装差异化 prompt"
   ],
   "test": {
-    "commands": ["python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print(\"Workflow OK\")'"],
-    "unit": ["tests/test_workflow/test_engine.py", "tests/test_workflow/test_state.py"],
-    "success_metrics": ["WorkflowEngine 可以实例化", "状态转换按预期工作", "WorkflowState 可以序列化和反序列化"]
+    "commands": ["python -c 'from tflow.core.executor import AgentExecutor, AgentType, RunOptions; print(\"OK\")'"],
+    "unit": ["tests/test_executor.py"],
+    "success_metrics": ["模块导入成功", "类结构正确"]
   },
   "reference": {
-    "pattern": "参考 design doc 3.1 节 workflow 模块定义，4.0.1 节状态映射",
-    "files": ["docs/tflow-python-backend-design.md"]
+    "pattern": "遵循设计文档 4.1 节 AgentExecutor 设计，参考 Maestro CliAgentRunner",
+    "files": ["docs/tflow-python-backend-design.md:297-572"]
   },
   "meta": {
     "status": "completed",
     "estimated_time": "60m",
     "risk": "medium",
-    "wave": 2,
+    "wave": 1,
     "executor": "agent"
   }
 }

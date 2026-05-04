@@ -1,0 +1,113 @@
+{
+  "phase": "verification",
+  "status": "gaps_found",
+  "layers": {
+    "existence": {
+      "passed": true,
+      "checks": [
+        {"check": "src/tflow/broker/__init__.py", "exists": true},
+        {"check": "src/tflow/broker/persistence.py", "exists": true},
+        {"check": "src/tflow/broker/json_broker.py", "exists": true},
+        {"check": "src/tflow/broker/job.py", "exists": true},
+        {"check": "src/tflow/broker/job_manager.py", "exists": true},
+        {"check": "src/tflow/broker/event.py", "exists": true},
+        {"check": "src/tflow/broker/message.py", "exists": true},
+        {"check": "src/tflow/core/__init__.py", "exists": true},
+        {"check": "src/tflow/core/executor.py", "exists": true},
+        {"check": "src/tflow/__init__.py", "exists": true},
+        {"check": "src/tflow/__main__.py", "exists": true}
+      ]
+    },
+    "substantive": {
+      "passed": true,
+      "checks": [
+        {"check": "broker/__init__.py exports JobManager, JsonBroker, BrokerPersistence", "pass": true},
+        {"check": "core/executor.py contains AgentExecutor class", "pass": true},
+        {"check": "AgentExecutor has run() method accepting RunOptions", "pass": true},
+        {"check": "AgentExecutor supports CLAUDE_CODE, GEMINI, QWEN, CODEX, OPENCODE", "pass": true},
+        {"check": "RunOptions dataclass with required fields", "pass": true},
+        {"check": "ExecutionResult dataclass with required fields", "pass": true},
+        {"check": "CLI uses click framework with run, delegate, status, session commands", "pass": true}
+      ]
+    },
+    "connectivity": {
+      "passed": false,
+      "checks": [
+        {"check": "python -m tflow --help", "pass": true, "output": "Shows help with run, delegate, status, session commands"},
+        {"check": "python -m tflow --version", "pass": true, "output": "0.1.0"},
+        {"check": "python -m tflow run --help", "pass": true},
+        {"check": "python -m tflow delegate --help", "pass": true},
+        {"check": "from tflow.broker import JobManager, JsonBroker, BrokerPersistence", "pass": true},
+        {"check": "from tflow.core.executor import AgentExecutor, AgentType, RunOptions, ExecutionResult", "pass": true},
+        {"check": "python -m tflow status", "pass": false, "error": "expected str, bytes or os.PathLike object, not JsonBroker"},
+        {"check": "python -m tflow session list", "pass": false, "error": "expected str, bytes or os.PathLike object, not JsonBroker"}
+      ]
+    }
+  },
+  "convergence_check": {
+    "TASK-001": {
+      "status": "pass",
+      "criteria": [
+        {"criterion": "git show HEAD:src/tflow/broker/__init__.py 恢复成功", "pass": true, "evidence": "File exists at src/tflow/broker/__init__.py"},
+        {"criterion": "所有 7 个 broker 文件存在于 src/tflow/broker/", "pass": true, "evidence": "7 files verified: __init__.py, persistence.py, json_broker.py, job.py, job_manager.py, event.py, message.py"},
+        {"criterion": "python -c 'from tflow.broker import JobManager, JsonBroker' 无报错", "pass": true, "evidence": "Import succeeds with PYTHONPATH"}
+      ]
+    },
+    "TASK-002": {
+      "status": "pass",
+      "criteria": [
+        {"criterion": "core/executor.py 包含 AgentExecutor 类", "pass": true, "evidence": "AgentExecutor class defined at line 78"},
+        {"criterion": "AgentExecutor.run() 方法可接受 RunOptions 并返回 ExecutionResult", "pass": true, "evidence": "run() method defined at line 100, returns ExecutionResult"},
+        {"criterion": "支持 AgentType.CLAUDE_CODE, GEMINI, QWEN, CODEX, OPENCODE", "pass": true, "evidence": "AgentType enum at line 13-18"},
+        {"criterion": "python -c 'from tflow.core.executor import AgentExecutor, AgentType, RunOptions' 无报错", "pass": true, "evidence": "Import succeeds"}
+      ]
+    },
+    "TASK-003": {
+      "status": "pass",
+      "criteria": [
+        {"criterion": "src/tflow/__main__.py 存在", "pass": true, "evidence": "File exists"},
+        {"criterion": "python -m tflow --help 输出帮助信息", "pass": true, "evidence": "Shows help with 4 commands"},
+        {"criterion": "支持 run, delegate, status, session 子命令", "pass": true, "evidence": "All 4 commands present in --help"},
+        {"criterion": "python -m tflow status 无报错(连接 broker)", "pass": false, "evidence": "Error: JobManager expects db_path, receives JsonBroker"}
+      ]
+    }
+  },
+  "must_haves": {
+    "truths": [
+      {"claim": "broker module files restored from git", "verified": true},
+      {"claim": "AgentExecutor implements run() and run_async() methods", "verified": true},
+      {"claim": "CLI uses click framework", "verified": true}
+    ],
+    "artifacts": [
+      {"path": "src/tflow/broker/__init__.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/broker/persistence.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/broker/json_broker.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/broker/job.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/broker/job_manager.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/broker/event.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/broker/message.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/core/__init__.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/core/executor.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/__init__.py", "exists": true, "substantial": true},
+      {"path": "src/tflow/__main__.py", "exists": true, "substantial": true}
+    ],
+    "key_links": [
+      {"from": "tflow.__main__", "to": "tflow.core.executor", "connected": true},
+      {"from": "tflow.__main__", "to": "tflow.broker", "connected": true, "note": "but broker usage in status/session commands is buggy"},
+      {"from": "tflow.broker", "to": "tflow.broker.persistence", "connected": true},
+      {"from": "tflow.broker", "to": "tflow.broker.json_broker", "connected": true}
+    ]
+  },
+  "gaps": [
+    {
+      "layer": "connectivity",
+      "description": "JobManager constructor expects db_path (str|Path|None), but status and session commands pass JsonBroker object",
+      "severity": "high",
+      "task": "TASK-003",
+      "location": "src/tflow/__main__.py:102-103 (status command) and lines 122-123 (session list), 138-139 (session show)",
+      "evidence": "TypeError: expected str, bytes or os.PathLike object, not JsonBroker",
+      "fix_needed": "Pass db_path to JobManager(), not JsonBroker. JsonBroker and JobManager are separate implementations - status/session commands should use one or the other, not both."
+    }
+  ],
+  "verified_at": "2026-05-05T00:50:00"
+}

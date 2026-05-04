@@ -1,63 +1,49 @@
 {
   "id": "TASK-001",
-  "title": "补全 broker 模块持久化实现",
-  "description": "实现 broker/persistence.py (BrokerPersistence 抽象基类) 和 broker/json_broker.py (JSONL 存储实现)，完成 broker 模块的缺失部分。broker/job.py, broker/event.py, broker/message.py 已存在，只需修复 __init__.py 的导入错误并添加新文件。",
+  "title": "恢复 broker 模块文件",
+  "description": "从 git HEAD 恢复已提交但被删除的 broker 模块文件，包括 __init__.py, persistence.py, json_broker.py, job.py, job_manager.py, event.py, message.py",
   "type": "feature",
   "priority": "high",
-  "effort": "medium",
-  "action": "Implement",
+  "effort": "low",
+  "action": "Restore",
   "scope": "src/tflow/broker",
-  "focus_paths": [
-    "src/tflow/broker/__init__.py",
-    "src/tflow/broker/persistence.py",
-    "src/tflow/broker/json_broker.py"
-  ],
+  "focus_paths": ["src/tflow/broker/"],
   "depends_on": [],
   "convergence": {
     "criteria": [
-      "src/tflow/broker/persistence.py 包含 'class BrokerPersistence(ABC)' 定义",
-      "src/tflow/broker/json_broker.py 包含 'class JsonBroker(BrokerPersistence)' 定义",
-      "src/tflow/broker/json_broker.py 实现了 save_job, get_job, save_event, get_events 方法",
-      "src/tflow/broker/__init__.py 可以成功导入 JsonBroker 且无循环依赖",
-      "python -c 'from tflow.broker import JsonBroker, BrokerPersistence; print(\"Broker imports OK\")' 执行成功"
+      "git show HEAD:src/tflow/broker/__init__.py 恢复成功",
+      "所有 7 个 broker 文件存在于 src/tflow/broker/",
+      "python -c 'from tflow.broker import JobManager, JsonBroker' 无报错"
     ],
-    "verification": "python -c 'from tflow.broker import JsonBroker, BrokerPersistence; print(\"Broker imports OK\")'"
+    "verification": "git checkout HEAD -- src/tflow/broker/ && python -c 'from tflow.broker import JobManager, JsonBroker'"
   },
   "files": [
-    {
-      "path": "src/tflow/broker/__init__.py",
-      "action": "update",
-      "target": "修复导入错误，导出 JsonBroker, BrokerPersistence"
-    },
-    {
-      "path": "src/tflow/broker/persistence.py",
-      "action": "create",
-      "target": "BrokerPersistence ABC - 定义 save_job, get_job, save_event, get_events, list_jobs 抽象方法"
-    },
-    {
-      "path": "src/tflow/broker/json_broker.py",
-      "action": "create",
-      "target": "JsonBroker JSONL 实现 - 使用 JSONL 文件存储事件和数据"
-    }
+    {"path": "src/tflow/broker/__init__.py", "action": "restore", "target": "模块导出"},
+    {"path": "src/tflow/broker/persistence.py", "action": "restore", "target": "BrokerPersistence 基类"},
+    {"path": "src/tflow/broker/json_broker.py", "action": "restore", "target": "JsonBroker 实现"},
+    {"path": "src/tflow/broker/job.py", "action": "restore", "target": "Job, JobStatus"},
+    {"path": "src/tflow/broker/job_manager.py", "action": "restore", "target": "JobManager"},
+    {"path": "src/tflow/broker/event.py", "action": "restore", "target": "JobEvent"},
+    {"path": "src/tflow/broker/message.py", "action": "restore", "target": "QueuedMessage"}
   ],
   "implementation": [
-    "更新 broker/__init__.py - 修复导入错误，导出 JsonBroker, BrokerPersistence, Job, JobEvent, QueuedMessage",
-    "创建 broker/persistence.py - BrokerPersistence 抽象基类，定义 save_job, get_job, save_event, get_events, list_jobs 抽象方法",
-    "创建 broker/json_broker.py - JsonBroker 实现类，继承 BrokerPersistence，使用 JSONL 文件存储事件和数据"
+    "使用 git checkout HEAD -- src/tflow/broker/ 恢复所有文件",
+    "验证 broker/__init__.py 导出 JobManager, JsonBroker, BrokerPersistence",
+    "验证导入无循环依赖错误"
   ],
   "test": {
-    "commands": ["python -m pytest tests/test_broker.py -v --tb=short"],
-    "unit": ["tests/test_broker/test_persistence.py", "tests/test_broker/test_json_broker.py"],
-    "success_metrics": ["BrokerPersistence 抽象方法全部实现", "JsonBroker 可以实例化并调用 save_job/get_job", "JSONL 文件正确创建和读取"]
+    "commands": ["python -c 'from tflow.broker import JobManager, JsonBroker, BrokerPersistence; print(\"OK\")'"],
+    "unit": [],
+    "success_metrics": ["导入成功无错误", "无循环依赖警告"]
   },
   "reference": {
-    "pattern": "参考 design doc 2.1 节 broker 模块现状，persistence 参考 4.2.1 和 4.2.2 节",
+    "pattern": "遵循设计文档 4.2 节 broker 模块架构",
     "files": ["docs/tflow-python-backend-design.md"]
   },
   "meta": {
     "status": "completed",
-    "estimated_time": "60m",
-    "risk": "medium",
+    "estimated_time": "15m",
+    "risk": "low",
     "wave": 1,
     "executor": "agent"
   }

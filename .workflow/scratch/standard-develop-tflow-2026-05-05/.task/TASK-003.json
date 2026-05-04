@@ -1,0 +1,51 @@
+{
+  "id": "TASK-003",
+  "title": "创建 CLI 入口 __main__.py",
+  "description": "创建 tflow CLI 入口文件，使用 click 框架实现子命令：run(执行工作流)、delegate(委派任务)、status(查看状态)、session(会话管理)",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/tflow",
+  "focus_paths": ["src/tflow/"],
+  "depends_on": [],
+  "convergence": {
+    "criteria": [
+      "src/tflow/__main__.py 存在",
+      "python -m tflow --help 输出帮助信息",
+      "支持 run, delegate, status, session 子命令",
+      "python -m tflow status 无报错(连接 broker)"
+    ],
+    "verification": "python -m tflow --help && python -m tflow status"
+  },
+  "files": [
+    {"path": "src/tflow/__main__.py", "action": "create", "target": "CLI 入口"},
+    {"path": "src/tflow/__init__.py", "action": "create", "target": "包初始化"}
+  ],
+  "implementation": [
+    "创建 src/tflow/__init__.py 定义 __version__",
+    "创建 src/tflow/__main__.py 使用 click 框架",
+    "实现 run 命令: tflow run --goal <goal> --scope <paths>",
+    "实现 delegate 命令: tflow delegate <prompt> --to <agent> --mode <mode>",
+    "实现 status 命令: tflow status [session]",
+    "实现 session list/show 命令: tflow session list|show <id>",
+    "初始化 JobManager 和 broker 连接",
+    "异常处理和用户友好的错误信息"
+  ],
+  "test": {
+    "commands": ["python -m tflow --help", "python -m tflow status"],
+    "unit": [],
+    "success_metrics": ["--help 输出帮助", "status 命令可执行"]
+  },
+  "reference": {
+    "pattern": "遵循 README 中的 CLI 命令设计，使用 click 框架",
+    "files": ["README.md"]
+  },
+  "meta": {
+    "status": "completed",
+    "estimated_time": "60m",
+    "risk": "medium",
+    "wave": 1,
+    "executor": "agent"
+  }
+}

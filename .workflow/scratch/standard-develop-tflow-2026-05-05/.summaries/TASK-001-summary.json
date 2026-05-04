@@ -1,28 +1,18 @@
-# TASK-001: 补全 broker 模块持久化实现
-
-## Changes
-- `src/tflow/broker/__init__.py`: 修复导入错误，导出所有 broker 模块类
-- `src/tflow/broker/persistence.py`: 创建 BrokerPersistence ABC，定义 save_job, get_job, save_event, get_events, list_jobs 抽象方法
-- `src/tflow/broker/json_broker.py`: 创建 JsonBroker JSONL 实现，使用 JSONL 文件存储事件和数据
-- `src/tflow/broker/job.py`: 创建 Job 数据类和 JobStatus 枚举
-- `src/tflow/broker/event.py`: 创建 JobEvent 事件类
-- `src/tflow/broker/message.py`: 创建 QueuedMessage 消息队列类
-- `src/tflow/broker/job_manager.py`: 创建 JobManager 状态管理和事件 Broker
-
-## Verification
-- [x] `src/tflow/broker/persistence.py` 包含 `class BrokerPersistence(ABC)` 定义
-- [x] `src/tflow/broker/json_broker.py` 包含 `class JsonBroker(BrokerPersistence)` 定义
-- [x] `src/tflow/broker/json_broker.py` 实现了 save_job, get_job, save_event, get_events 方法
-- [x] `src/tflow/broker/__init__.py` 可以成功导入 JsonBroker 且无循环依赖
-- [x] `python -c 'from tflow.broker import JsonBroker, BrokerPersistence; print("Broker imports OK")'` 执行成功
-
-## Tests
-- [x] `PYTHONPATH=/home/eeric/code/testing-flow/src python -c 'from tflow.broker import JsonBroker, BrokerPersistence; print("Broker imports OK")'`: PASS
-
-## Deviations
-- 设计文档提到 broker/job.py, broker/event.py, broker/message.py 已存在，但实际不存在，已一并创建
-
-## Notes
-- JsonBroker 使用 JSONL 文件存储，jobs 存储在 .tflow/data/jobs.jsonl
-- 事件存储在 .tflow/data/events/{job_id}.jsonl
-- Task completed successfully
+{
+  "task_id": "TASK-001",
+  "status": "completed",
+  "completed_at": "2026-05-05T00:42:00",
+  "summary": "从 git HEAD 恢复 broker 模块文件（7个文件），验证导入成功",
+  "files_changed": [],
+  "files_restored": [
+    "src/tflow/broker/__init__.py",
+    "src/tflow/broker/event.py",
+    "src/tflow/broker/job.py",
+    "src/tflow/broker/job_manager.py",
+    "src/tflow/broker/json_broker.py",
+    "src/tflow/broker/message.py",
+    "src/tflow/broker/persistence.py"
+  ],
+  "verification": "PYTHONPATH=/home/eeric/code/testing-flow/src python3 -c 'from tflow.broker import JobManager, JsonBroker, BrokerPersistence; print(\"OK\")' => OK",
+  "note": "文件已在 commit 1ef19f8 中提交，git checkout 恢复后工作区干净"
+}

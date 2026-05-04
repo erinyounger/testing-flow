@@ -1,0 +1,28 @@
+{
+  "summary": "实现 tflow Python 后端核心模块 Phase 1：恢复 broker 模块、实现 AgentExecutor 和创建 CLI 入口",
+  "approach": "按优先级分 3 个原子任务：第一波恢复已提交但被删除的 broker 文件，第二波实现核心执行器，第三波创建 CLI 入口。任务可并行执行。",
+  "task_ids": ["TASK-001", "TASK-002", "TASK-003"],
+  "task_count": 3,
+  "complexity": "medium",
+  "estimated_time": "3h",
+  "recommended_execution": "Agent",
+  "waves": [
+    {"wave": 1, "tasks": ["TASK-001", "TASK-002", "TASK-003"]}
+  ],
+  "design_decisions": [
+    "broker 模块已有完整实现(JobManager, JsonBroker, BrokerPersistence)，仅需从 git 恢复",
+    "AgentExecutor 参考 Maestro 的 CliAgentRunner 设计",
+    "CLI 使用 click 框架实现子命令"
+  ],
+  "shared_context": {
+    "patterns": ["状态机模式(workflow)", "事件驱动(broker)", "Job 队列模式"],
+    "conventions": ["async/await", "dataclass", "Pathlib"],
+    "dependencies": ["click", "sqlite3(builtin)"]
+  },
+  "_metadata": {
+    "timestamp": "2026-05-05T00:36:00",
+    "source": "agent-planner",
+    "planning_mode": "standard",
+    "plan_type": "feature"
+  }
+}

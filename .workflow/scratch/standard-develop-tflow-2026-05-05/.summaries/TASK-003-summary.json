@@ -1,0 +1,11 @@
+{
+  "task_id": "TASK-003",
+  "status": "completed",
+  "completed_at": "2026-05-05T00:48:00",
+  "summary": "创建 tflow CLI 入口，实现 run, delegate, status, session 命令",
+  "files_changed": [
+    "src/tflow/__init__.py",
+    "src/tflow/__main__.py"
+  ],
+  "verification": "python -m tflow --help => OK, python -m tflow --version => 0.1.0"
+}
