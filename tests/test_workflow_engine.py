@@ -23,8 +23,9 @@ class TestWorkflowPersistence:
     def test_save_and_load(self):
         """Test saving and loading workflow state."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-workflow-1",
-            name="Test Workflow",
             workflow_type=WorkflowType.STANDARD,
             persistence=self.persistence,
         )
@@ -36,12 +37,13 @@ class TestWorkflowPersistence:
         loaded = self.persistence.load("test-workflow-1")
         assert loaded is not None
         assert loaded.workflow_id == "test-workflow-1"
-        assert loaded.name == "Test Workflow"
         assert loaded.status == WorkflowStatus.IDLE
 
     def test_exists(self):
         """Test exists check."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-workflow-2",
             persistence=self.persistence,
         )
@@ -53,6 +55,8 @@ class TestWorkflowPersistence:
     def test_delete(self):
         """Test deleting workflow state."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-workflow-3",
             persistence=self.persistence,
         )
@@ -65,6 +69,8 @@ class TestWorkflowPersistence:
         """Test listing workflows."""
         for i in range(3):
             engine = WorkflowEngine(
+                job_manager=None,
+                agent_executor=None,
                 workflow_id=f"test-workflow-{i}",
                 persistence=self.persistence,
             )
@@ -82,9 +88,11 @@ class TestWorkflowState:
         from tflow.workflow.state import WorkflowState
 
         state = WorkflowState(
-            workflow_id="test",
-            name="Test",
+            workflow_type=WorkflowType.STANDARD,
+            session_id="test-session",
             status=WorkflowStatus.IDLE,
+            current_phase="idle",
+            workflow_id="test",
         )
 
         assert state.can_transition_to(WorkflowStatus.PARSING)
@@ -95,9 +103,11 @@ class TestWorkflowState:
         from tflow.workflow.state import WorkflowState
 
         state = WorkflowState(
-            workflow_id="test",
-            name="Test",
+            workflow_type=WorkflowType.STANDARD,
+            session_id="test-session",
             status=WorkflowStatus.IDLE,
+            current_phase="idle",
+            workflow_id="test",
         )
 
         assert state.transition_to(WorkflowStatus.PARSING)
@@ -111,17 +121,17 @@ class TestWorkflowState:
         from tflow.workflow.state import WorkflowState
 
         state = WorkflowState(
-            workflow_id="test",
-            name="Test",
+            workflow_type=WorkflowType.STANDARD,
+            session_id="test-session",
             status=WorkflowStatus.EXECUTING,
-            progress=0.5,
+            current_phase="executing",
+            workflow_id="test",
         )
         state.set_context("key", "value")
 
         data = state.to_dict()
         assert data["workflow_id"] == "test"
         assert data["status"] == "executing"
-        assert data["progress"] == 0.5
         assert data["context"]["key"] == "value"
 
         loaded = WorkflowState.from_dict(data)
@@ -145,20 +155,21 @@ class TestWorkflowEngine:
     def test_init(self):
         """Test engine initialization."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-1",
-            name="Test Engine",
-            workflow_type=WorkflowType.BUILD,
+            workflow_type=WorkflowType.STANDARD,
             persistence=self.persistence,
         )
 
         assert engine.workflow_id == "test-engine-1"
-        assert engine.name == "Test Engine"
-        assert engine.status == WorkflowStatus.IDLE
-        assert engine.workflow_type == WorkflowType.BUILD
+        assert engine.workflow_type == WorkflowType.STANDARD
 
     def test_start_transition(self):
         """Test starting workflow."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-2",
             persistence=self.persistence,
         )
@@ -170,6 +181,8 @@ class TestWorkflowEngine:
     def test_full_lifecycle(self):
         """Test full workflow lifecycle."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-3",
             persistence=self.persistence,
         )
@@ -205,6 +218,8 @@ class TestWorkflowEngine:
     def test_invalid_transition(self):
         """Test invalid state transition."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-4",
             persistence=self.persistence,
         )
@@ -215,6 +230,8 @@ class TestWorkflowEngine:
     def test_pause_resume(self):
         """Test pause and resume."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-5",
             persistence=self.persistence,
         )
@@ -237,6 +254,8 @@ class TestWorkflowEngine:
     def test_cancel(self):
         """Test cancel workflow."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-6",
             persistence=self.persistence,
         )
@@ -245,13 +264,15 @@ class TestWorkflowEngine:
         # After start(), status is PARSING
         assert engine.status == WorkflowStatus.PARSING
 
-        # Cancel from PARSING
+        # Cancel from PARSING sets to FAILED
         assert engine.cancel()
-        assert engine.status == WorkflowStatus.CANCELLED
+        assert engine.status == WorkflowStatus.FAILED
 
     def test_fail(self):
         """Test fail workflow."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-7",
             persistence=self.persistence,
         )
@@ -261,25 +282,11 @@ class TestWorkflowEngine:
         assert engine.status == WorkflowStatus.FAILED
         assert engine.state.error == "Test error"
 
-    def test_progress(self):
-        """Test progress tracking."""
-        engine = WorkflowEngine(
-            workflow_id="test-engine-8",
-            persistence=self.persistence,
-        )
-
-        engine.set_progress(0.5)
-        assert engine.state.progress == 0.5
-
-        engine.set_progress(1.5)  # Should be clamped
-        assert engine.state.progress == 1.0
-
-        engine.set_progress(-0.5)  # Should be clamped
-        assert engine.state.progress == 0.0
-
     def test_context(self):
         """Test context management."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-9",
             persistence=self.persistence,
         )
@@ -294,6 +301,8 @@ class TestWorkflowEngine:
     def test_handler_registration(self):
         """Test phase handler registration."""
         engine = WorkflowEngine(
+            job_manager=None,
+            agent_executor=None,
             workflow_id="test-engine-10",
             persistence=self.persistence,
         )

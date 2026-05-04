@@ -21,12 +21,12 @@ class TestAgentConfig:
     def test_create(self):
         """Test creating agent config."""
         config = AgentConfig(
-            agent_type=AgentType.CLAUDE,
+            agent_type=AgentType.CLAUDE_CODE,
             name="test-agent",
             description="A test agent",
         )
 
-        assert config.agent_type == AgentType.CLAUDE
+        assert config.agent_type == AgentType.CLAUDE_CODE
         assert config.name == "test-agent"
         assert config.command == "claude"
 
@@ -83,7 +83,7 @@ class TestAgentRegistry:
     def test_register_and_get(self):
         """Test registering and getting agents."""
         config = AgentConfig(
-            agent_type=AgentType.CLAUDE,
+            agent_type=AgentType.CLAUDE_CODE,
             name="claude-agent",
             description="Claude agent",
         )
@@ -110,7 +110,7 @@ class TestAgentRegistry:
 
     def test_list_agents(self):
         """Test listing agents."""
-        config1 = AgentConfig(agent_type=AgentType.CLAUDE, name="agent1", description="Agent 1")
+        config1 = AgentConfig(agent_type=AgentType.CLAUDE_CODE, name="agent1", description="Agent 1")
         config2 = AgentConfig(agent_type=AgentType.GEMINI, name="agent2", description="Agent 2")
 
         self.registry.create_agent(config1)
@@ -124,7 +124,7 @@ class TestAgentRegistry:
     def test_create_agent(self):
         """Test creating agents via registry."""
         config = AgentConfig(
-            agent_type=AgentType.CLAUDE,
+            agent_type=AgentType.CLAUDE_CODE,
             name="claude-test",
             description="Claude test",
         )
@@ -144,13 +144,13 @@ class TestBaseAgent:
     def test_claude_agent(self):
         """Test ClaudeAgent creation."""
         config = AgentConfig(
-            agent_type=AgentType.CLAUDE,
+            agent_type=AgentType.CLAUDE_CODE,
             name="claude-agent",
             description="Claude agent",
         )
         agent = ClaudeAgent(config)
         assert agent.name == "claude-agent"
-        assert agent.agent_type == AgentType.CLAUDE
+        assert agent.agent_type == AgentType.CLAUDE_CODE
 
     def test_gemini_agent(self):
         """Test GeminiAgent creation."""

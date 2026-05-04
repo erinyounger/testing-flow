@@ -1,6 +1,7 @@
 """Tests for storage modules."""
 
 import pytest
+import asyncio
 import tempfile
 import shutil
 from pathlib import Path
@@ -56,7 +57,8 @@ class TestExecutionStore:
         """Clean up test fixtures."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_append(self):
+    @pytest.mark.asyncio
+    async def test_append(self):
         """Test appending records."""
         record = ExecutionRecord(
             execution_id="exec-1",
@@ -67,9 +69,11 @@ class TestExecutionStore:
             input_data={},
         )
 
-        assert self.store.append(record)
+        result = await self.store.append(record)
+        assert result is True
 
-    def test_get(self):
+    @pytest.mark.asyncio
+    async def test_get(self):
         """Test getting records."""
         record = ExecutionRecord(
             execution_id="exec-1",
@@ -79,13 +83,14 @@ class TestExecutionStore:
             status="completed",
             input_data={},
         )
-        self.store.append(record)
+        await self.store.append(record)
 
-        records = self.store.get("wf-1")
+        records = await self.store.get("wf-1")
         assert len(records) == 1
         assert records[0].execution_id == "exec-1"
 
-    def test_get_latest(self):
+    @pytest.mark.asyncio
+    async def test_get_latest(self):
         """Test getting latest record."""
         for i in range(3):
             record = ExecutionRecord(
@@ -96,12 +101,13 @@ class TestExecutionStore:
                 status="completed",
                 input_data={},
             )
-            self.store.append(record)
+            await self.store.append(record)
 
-        latest = self.store.get_latest("wf-1")
+        latest = await self.store.get_latest("wf-1")
         assert latest.execution_id == "exec-2"
 
-    def test_get_by_task(self):
+    @pytest.mark.asyncio
+    async def test_get_by_task(self):
         """Test getting records by task."""
         record = ExecutionRecord(
             execution_id="exec-1",
@@ -111,12 +117,13 @@ class TestExecutionStore:
             status="completed",
             input_data={},
         )
-        self.store.append(record)
+        await self.store.append(record)
 
-        records = self.store.get_by_task("wf-1", "task-x")
+        records = await self.store.get_by_task("wf-1", "task-x")
         assert len(records) == 1
 
-    def test_list_workflows(self):
+    @pytest.mark.asyncio
+    async def test_list_workflows(self):
         """Test listing workflows."""
         for wf_id in ["wf-1", "wf-2", "wf-3"]:
             record = ExecutionRecord(
@@ -127,9 +134,9 @@ class TestExecutionStore:
                 status="completed",
                 input_data={},
             )
-            self.store.append(record)
+            await self.store.append(record)
 
-        workflows = self.store.list_workflows()
+        workflows = await self.store.list_workflows()
         assert len(workflows) == 3
 
 
@@ -150,7 +157,8 @@ class TestSQLiteStore:
         except Exception:
             pass
 
-    def test_save_session(self):
+    @pytest.mark.asyncio
+    async def test_save_session(self):
         """Test saving session."""
         session_data = {
             "session_id": "session-1",
@@ -161,9 +169,11 @@ class TestSQLiteStore:
             "metadata": {},
         }
 
-        assert self.store.save_session(session_data)
+        result = await self.store.save_session(session_data)
+        assert result is True
 
-    def test_get_session(self):
+    @pytest.mark.asyncio
+    async def test_get_session(self):
         """Test getting session."""
         session_data = {
             "session_id": "session-2",
@@ -173,13 +183,14 @@ class TestSQLiteStore:
             "updated_at": "2024-01-01T00:00:00",
             "metadata": {},
         }
-        self.store.save_session(session_data)
+        await self.store.save_session(session_data)
 
-        retrieved = self.store.get_session("session-2")
+        retrieved = await self.store.get_session("session-2")
         assert retrieved is not None
         assert retrieved["session_id"] == "session-2"
 
-    def test_list_sessions(self):
+    @pytest.mark.asyncio
+    async def test_list_sessions(self):
         """Test listing sessions."""
         for i in range(3):
             session_data = {
@@ -190,12 +201,13 @@ class TestSQLiteStore:
                 "updated_at": "2024-01-01T00:00:00",
                 "metadata": {},
             }
-            self.store.save_session(session_data)
+            await self.store.save_session(session_data)
 
-        sessions = self.store.list_sessions()
+        sessions = await self.store.list_sessions()
         assert len(sessions) == 3
 
-    def test_save_task(self):
+    @pytest.mark.asyncio
+    async def test_save_task(self):
         """Test saving task."""
         task_data = {
             "task_id": "task-1",
@@ -208,9 +220,11 @@ class TestSQLiteStore:
             "updated_at": "2024-01-01T00:00:00",
         }
 
-        assert self.store.save_task(task_data)
+        result = await self.store.save_task(task_data)
+        assert result is True
 
-    def test_get_task(self):
+    @pytest.mark.asyncio
+    async def test_get_task(self):
         """Test getting task."""
         task_data = {
             "task_id": "task-2",
@@ -222,14 +236,15 @@ class TestSQLiteStore:
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
         }
-        self.store.save_task(task_data)
+        await self.store.save_task(task_data)
 
-        retrieved = self.store.get_task("task-2")
+        retrieved = await self.store.get_task("task-2")
         assert retrieved is not None
         assert retrieved["task_id"] == "task-2"
 
-    def test_list_tasks(self):
-        """Test listing tasks."""
+    @pytest.mark.asyncio
+    async def test_get_tasks(self):
+        """Test getting tasks."""
         for i in range(3):
             task_data = {
                 "task_id": f"task-{i}",
@@ -240,9 +255,9 @@ class TestSQLiteStore:
                 "created_at": "2024-01-01T00:00:00",
                 "updated_at": "2024-01-01T00:00:00",
             }
-            self.store.save_task(task_data)
+            await self.store.save_task(task_data)
 
-        tasks = self.store.list_tasks()
+        tasks = await self.store.get_tasks("session-1")
         assert len(tasks) == 3
 
 
