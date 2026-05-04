@@ -51,9 +51,6 @@ verification.json
 
 **完成后的下一步路由：**
 - 任务完成，--full 验证通过 → /manage-status
-- 任务完成，验证发现差距 → /quality-debug {issue}
-- 任务完成，需要同步文档 → /quality-sync
-- 需要完整阶段工作流 → /maestro-plan {phase}
 </execution>
 
 <error_codes>

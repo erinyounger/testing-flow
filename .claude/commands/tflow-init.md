@@ -44,8 +44,6 @@ Created:
 
 Next steps:
   /tflow-standard <测试任务描述>              -- 执行标准测试任务流程
-  /tflow-status                               -- 查看工作空间状态
-  /tflow-plan <phase>                         -- 规划测试阶段
 ```
 </execution>
 
