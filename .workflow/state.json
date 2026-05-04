@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "project_name": "testing-flow",
+  "status": "idle",
+  "current_task_id": null,
+  "artifacts": [],
+  "last_updated": "2026-05-04T21:00:00+08:00",
+  "accumulated_context": {
+    "key_decisions": [],
+    "blockers": [],
+    "deferred": [],
+    "standard_tasks": [
+      {
+        "id": "standard-snake-game-html-2026-05-04",
+        "description": "使用html单页面方式开发一个贪吃蛇游戏，使用best practice 技术栈",
+        "completed_at": "2026-05-04T21:00:00+08:00",
+        "directory": ".workflow/scratch/standard-snake-game-html-2026-05-04",
+        "verified": "skipped"
+      }
+    ]
+  }
+}
