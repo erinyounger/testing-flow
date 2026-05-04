@@ -272,10 +272,12 @@ Spawning plan checker...
 Spawn `agent-executor` agent：
 
 - **Read**: plan.json, TASK-*.json, state.json, CLAUDE.md
-- **Constraints**: 执行所有任务，每个任务原子提交，写入摘要到 `${STANDARD_DIR}/.summaries/TASK-{NNN}-summary.md`
+- **Constraints**: 
+1. 执行所有任务，每个任务原子提交，写入摘要到 `${STANDARD_DIR}/.summaries/TASK-{NNN}.json`
+2. 不要随意在根目录生成文件/目录，需要专业的配置管理
 
 Executor 返回后：
-1. 验证摘要存在
+1. 验证摘要存在于 `${STANDARD_DIR}/.summaries/TASK-{NNN}.json`
 2. 更新 index.json execution 字段
 3. 报告完成状态
 
