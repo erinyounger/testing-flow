@@ -45,6 +45,33 @@
             font-size: 20px;
         }
 
+        #speedSelector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        #speedSelector label {
+            color: #aaa;
+            font-size: 16px;
+        }
+
+        #speedSelector select {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 1px solid #4ade80;
+            border-radius: 6px;
+            background: #0f0f1a;
+            color: #4ade80;
+            cursor: pointer;
+        }
+
+        #speedSelector select:focus {
+            outline: none;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
+        }
+
         #gameCanvas {
             border: 2px solid #4ade80;
             border-radius: 8px;
@@ -100,6 +127,111 @@
             color: #666;
             font-size: 14px;
         }
+
+        #leaderboard {
+            margin-top: 20px;
+            padding: 15px;
+            background: #0f0f1a;
+            border: 1px solid #4ade80;
+            border-radius: 8px;
+            max-width: 400px;
+            width: 100%;
+        }
+
+        #leaderboard h3 {
+            color: #4ade80;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        #leaderboard ol {
+            color: #aaa;
+            padding-left: 25px;
+        }
+
+        #leaderboard li {
+            padding: 5px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #leaderboard li:nth-child(1) { color: #ffd700; }
+        #leaderboard li:nth-child(2) { color: #c0c0c0; }
+        #leaderboard li:nth-child(3) { color: #cd7f32; }
+
+        #gameOverModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        #gameOverModal.show {
+            display: flex;
+        }
+
+        #gameOverContent {
+            background: #1a1a2e;
+            padding: 30px;
+            border-radius: 12px;
+            border: 2px solid #4ade80;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        #gameOverContent h2 {
+            color: #4ade80;
+            margin-bottom: 15px;
+        }
+
+        #gameOverContent p {
+            color: #aaa;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+
+        #gameOverContent input {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 1px solid #4ade80;
+            border-radius: 6px;
+            background: #0f0f1a;
+            color: #4ade80;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+        }
+
+        #gameOverContent input:focus {
+            outline: none;
+            box-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
+        }
+
+        #gameOverContent button {
+            padding: 12px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        #submitScoreBtn {
+            background: linear-gradient(135deg, #4ade80, #22c55e);
+            color: #1a1a2e;
+        }
+
+        #skipScoreBtn {
+            background: linear-gradient(135deg, #666, #444);
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -107,6 +239,14 @@
     <div id="game-info">
         <div class="info-item">分数: <span id="score">0</span></div>
         <div class="info-item">速度: <span id="speed">1</span></div>
+    </div>
+    <div id="speedSelector">
+        <label for="speedSelect">速度选择:</label>
+        <select id="speedSelect">
+            <option value="150">慢 (150ms)</option>
+            <option value="100" selected>中 (100ms)</option>
+            <option value="60">快 (60ms)</option>
+        </select>
     </div>
     <canvas id="gameCanvas" width="400" height="400"></canvas>
     <div id="controls">
@@ -116,10 +256,29 @@
     <div id="status"></div>
     <div id="instructions">方向键或 WASD 控制蛇的移动</div>
 
+    <div id="gameOverModal">
+        <div id="gameOverContent">
+            <h2>游戏结束!</h2>
+            <p>最终得分: <span id="finalScore">0</span></p>
+            <input type="text" id="usernameInput" placeholder="请输入用户名" maxlength="20">
+            <div>
+                <button id="submitScoreBtn">提交分数</button>
+                <button id="skipScoreBtn">跳过</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="leaderboard">
+        <h3>排行榜 (Top 10)</h3>
+        <ol id="leaderboardList"></ol>
+    </div>
+
     <script>
         const GRID_SIZE = 20;
         const CELL_SIZE = 20;
-        const GAME_SPEED = 100;
+        const SPEED_SLOW = 150;
+        const SPEED_MEDIUM = 100;
+        const SPEED_FAST = 60;
 
         class SnakeGame {
             constructor() {
@@ -130,6 +289,7 @@
                 this.statusElement = document.getElementById('status');
                 this.startBtn = document.getElementById('startBtn');
                 this.pauseBtn = document.getElementById('pauseBtn');
+                this.speedSelect = document.getElementById('speedSelect');
 
                 this.init();
                 this.bindEvents();
@@ -148,16 +308,37 @@
                 this.gameState = 'idle';
                 this.gameLoop = null;
                 this.lastUpdateTime = 0;
+                this.gameSpeed = parseInt(this.speedSelect.value);
 
                 this.render();
                 this.updateUI();
+                this.renderLeaderboard();
             }
 
             bindEvents() {
                 this.startBtn.addEventListener('click', () => this.startGame());
                 this.pauseBtn.addEventListener('click', () => this.togglePause());
+                this.speedSelect.addEventListener('change', (e) => {
+                    this.gameSpeed = parseInt(e.target.value);
+                });
+
+                document.getElementById('submitScoreBtn').addEventListener('click', () => this.submitScore());
+                document.getElementById('skipScoreBtn').addEventListener('click', () => this.skipScore());
+                document.getElementById('usernameInput').addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') this.submitScore();
+                });
 
                 document.addEventListener('keydown', (e) => this.handleKeyDown(e));
+            }
+
+            submitScore() {
+                const username = document.getElementById('usernameInput').value.trim() || '匿名玩家';
+                this.saveScore(username, this.score);
+                this.hideGameOverModal();
+            }
+
+            skipScore() {
+                this.hideGameOverModal();
             }
 
             handleKeyDown(e) {
@@ -228,7 +409,7 @@
 
                 const deltaTime = currentTime - this.lastUpdateTime;
 
-                if (deltaTime >= GAME_SPEED) {
+                if (deltaTime >= this.gameSpeed) {
                     this.direction = { ...this.nextDirection };
                     this.moveSnake();
                     this.lastUpdateTime = currentTime;
@@ -249,8 +430,8 @@
 
             moveSnake() {
                 const head = {
-                    x: this.snake[0].x + this.direction.x,
-                    y: this.snake[0].y + this.direction.y
+                    x: (this.snake[0].x + this.direction.x + GRID_SIZE) % GRID_SIZE,
+                    y: (this.snake[0].y + this.direction.y + GRID_SIZE) % GRID_SIZE
                 };
 
                 this.snake.unshift(head);
@@ -259,10 +440,6 @@
 
             checkCollision() {
                 const head = this.snake[0];
-
-                if (head.x < 0 || head.x >= GRID_SIZE || head.y < 0 || head.y >= GRID_SIZE) {
-                    return true;
-                }
 
                 for (let i = 1; i < this.snake.length; i++) {
                     if (head.x === this.snake[i].x && head.y === this.snake[i].y) {
@@ -314,6 +491,50 @@
                 this.statusElement.textContent = `游戏结束! 最终得分: ${this.score}`;
                 this.startBtn.textContent = '再来一局';
                 this.pauseBtn.textContent = '暂停';
+                this.showGameOverModal();
+            }
+
+            showGameOverModal() {
+                document.getElementById('finalScore').textContent = this.score;
+                document.getElementById('usernameInput').value = '';
+                document.getElementById('gameOverModal').classList.add('show');
+                document.getElementById('usernameInput').focus();
+            }
+
+            hideGameOverModal() {
+                document.getElementById('gameOverModal').classList.remove('show');
+            }
+
+            getLeaderboard() {
+                const data = localStorage.getItem('snakeLeaderboard');
+                return data ? JSON.parse(data) : [];
+            }
+
+            saveScore(username, score) {
+                const leaderboard = this.getLeaderboard();
+                leaderboard.push({ username, score, date: new Date().toISOString() });
+                leaderboard.sort((a, b) => b.score - a.score);
+                const top10 = leaderboard.slice(0, 10);
+                localStorage.setItem('snakeLeaderboard', JSON.stringify(top10));
+                this.renderLeaderboard();
+            }
+
+            renderLeaderboard() {
+                const leaderboard = this.getLeaderboard();
+                const list = document.getElementById('leaderboardList');
+                if (leaderboard.length === 0) {
+                    list.innerHTML = '<li>暂无记录</li>';
+                    return;
+                }
+                list.innerHTML = leaderboard.map((entry, index) =>
+                    `<li><span>${index + 1}. ${this.escapeHtml(entry.username)}</span><span>${entry.score}分</span></li>`
+                ).join('');
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
             }
 
             render() {
