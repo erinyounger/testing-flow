@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, AsyncIterator
 from datetime import datetime
 import asyncio
 
@@ -19,12 +19,10 @@ class EventDelivery(Enum):
 class BridgeEvent:
     """Bridge event dataclass."""
 
-    event_id: str
-    event_type: str
+    type: str
+    session_id: str
     data: Dict[str, Any]
-    timestamp: Optional[str] = None
-    source: Optional[str] = None
-    delivery: EventDelivery = EventDelivery.ASYNC
+    timestamp: str = ""
 
     def __post_init__(self):
         """Initialize timestamp if not set."""
@@ -39,6 +37,7 @@ class RealtimeBridgeConfig:
     name: str = "default"
     buffer_size: int = 1000
     heartbeat_interval: int = 30
+    max_queue_size: int = 100
     delivery: EventDelivery = EventDelivery.ASYNC
 
 
@@ -58,119 +57,113 @@ class RealtimeBridge:
             config = RealtimeBridgeConfig()
 
         self.config = config
-        self._subscribers: Dict[str, Callable] = {}
+        self._subscribers: Dict[str, List[asyncio.Queue]] = {}
         self._event_buffer: List[BridgeEvent] = []
         self._running = False
+        self._lock = asyncio.Lock()
 
-    def subscribe(
-        self,
-        subscriber_id: str,
-        callback: Callable[[BridgeEvent], None],
-    ) -> bool:
+    async def subscribe(self, session_id: str) -> AsyncIterator[BridgeEvent]:
         """Subscribe to events.
 
         Args:
-            subscriber_id: Unique subscriber ID
-            callback: Callback function for events
+            session_id: Session ID to subscribe to
 
-        Returns:
-            True if subscribed successfully
+        Yields:
+            BridgeEvent as they occur
         """
-        if subscriber_id in self._subscribers:
-            return False
+        queue: asyncio.Queue[BridgeEvent] = asyncio.Queue(maxsize=self.config.max_queue_size)
+        async with self._lock:
+            if session_id not in self._subscribers:
+                self._subscribers[session_id] = []
+            self._subscribers[session_id].append(queue)
 
-        self._subscribers[subscriber_id] = callback
-        return True
+        try:
+            while self._running:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield event
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            async with self._lock:
+                if session_id in self._subscribers and queue in self._subscribers[session_id]:
+                    self._subscribers[session_id].remove(queue)
 
-    def unsubscribe(self, subscriber_id: str) -> bool:
-        """Unsubscribe from events.
+    async def publish(self, session_id: str, event_type: str, data: Dict[str, Any]) -> None:
+        """Publish an event to subscribers.
 
         Args:
-            subscriber_id: Subscriber ID
-
-        Returns:
-            True if unsubscribed successfully
+            session_id: Session ID
+            event_type: Event type
+            data: Event data
         """
-        if subscriber_id in self._subscribers:
-            del self._subscribers[subscriber_id]
-            return True
-        return False
+        event = BridgeEvent(
+            type=event_type,
+            session_id=session_id,
+            timestamp=datetime.utcnow().isoformat(),
+            data=data,
+        )
 
-    def publish(self, event: BridgeEvent) -> bool:
-        """Publish an event to all subscribers.
-
-        Args:
-            event: Event to publish
-
-        Returns:
-            True if published successfully
-        """
         # Add to buffer
         self._event_buffer.append(event)
-
-        # Trim buffer if needed
         if len(self._event_buffer) > self.config.buffer_size:
             self._event_buffer = self._event_buffer[-self.config.buffer_size:]
 
         # Deliver to subscribers
-        if event.delivery == EventDelivery.SYNC:
-            self._deliver_sync(event)
-        elif event.delivery == EventDelivery.ASYNC:
-            asyncio.create_task(self._deliver_async(event))
-        elif event.delivery == EventDelivery.FIRE_AND_FORGET:
-            self._deliver_fire_and_forget(event)
+        async with self._lock:
+            queues = self._subscribers.get(session_id, [])
 
-        return True
-
-    def _deliver_sync(self, event: BridgeEvent) -> None:
-        """Deliver event synchronously."""
-        for subscriber_id, callback in self._subscribers.items():
+        for queue in queues:
             try:
-                callback(event)
-            except Exception as e:
-                print(f"Subscriber {subscriber_id} error: {e}")
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
-    async def _deliver_async(self, event: BridgeEvent) -> None:
-        """Deliver event asynchronously."""
-        for subscriber_id, callback in self._subscribers.items():
-            try:
-                if asyncio.iscoroutinefunction(callback):
-                    await callback(event)
-                else:
-                    callback(event)
-            except Exception as e:
-                print(f"Subscriber {subscriber_id} error: {e}")
-
-    def _deliver_fire_and_forget(self, event: BridgeEvent) -> None:
-        """Deliver event fire-and-forget style."""
-        for subscriber_id, callback in self._subscribers.items():
-            try:
-                if asyncio.iscoroutinefunction(callback):
-                    asyncio.create_task(callback(event))
-                else:
-                    callback(event)
-            except Exception:
-                pass  # Ignore errors in fire-and-forget mode
-
-    def broadcast(self, event_type: str, data: Dict[str, Any]) -> bool:
+    async def broadcast(self, event_type: str, data: Dict[str, Any]) -> None:
         """Broadcast an event to all subscribers.
 
         Args:
             event_type: Event type
             data: Event data
-
-        Returns:
-            True if broadcast successfully
         """
-        import uuid
-
         event = BridgeEvent(
-            event_id=str(uuid.uuid4()),
-            event_type=event_type,
+            type=event_type,
+            session_id="*",
+            timestamp=datetime.utcnow().isoformat(),
             data=data,
-            delivery=self.config.delivery,
         )
-        return self.publish(event)
+
+        # Add to buffer
+        self._event_buffer.append(event)
+        if len(self._event_buffer) > self.config.buffer_size:
+            self._event_buffer = self._event_buffer[-self.config.buffer_size:]
+
+        # Broadcast to all
+        async with self._lock:
+            all_queues = [q for queues in self._subscribers.values() for q in queues]
+
+        for queue in all_queues:
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+    async def attach_to_job_manager(self, job_manager: Any) -> None:
+        """Attach to JobManager to receive job events.
+
+        Args:
+            job_manager: JobManager instance to attach to
+        """
+        async def on_job_event(event: Any) -> None:
+            await self.publish(
+                event.job_id,
+                event.type,
+                {
+                    "status": event.status.value if event.status else None,
+                    "payload": event.payload,
+                }
+            )
+        await job_manager.subscribe(on_job_event)
 
     def get_events(
         self,
@@ -189,7 +182,7 @@ class RealtimeBridge:
         events = self._event_buffer
 
         if event_type:
-            events = [e for e in events if e.event_type == event_type]
+            events = [e for e in events if e.type == event_type]
 
         return events[-limit:]
 
@@ -204,7 +197,7 @@ class RealtimeBridge:
             try:
                 await asyncio.sleep(self.config.heartbeat_interval)
                 if self._running:
-                    self.broadcast("heartbeat", {"timestamp": datetime.utcnow().isoformat()})
+                    await self.broadcast("heartbeat", {"timestamp": datetime.utcnow().isoformat()})
             except asyncio.CancelledError:
                 break
 
@@ -214,7 +207,7 @@ class RealtimeBridge:
 
     def get_subscriber_count(self) -> int:
         """Get number of subscribers."""
-        return len(self._subscribers)
+        return sum(len(qs) for qs in self._subscribers.values())
 
     def format_sse(self, event: BridgeEvent) -> str:
         """Format event as SSE (Server-Sent Events).
@@ -225,4 +218,4 @@ class RealtimeBridge:
         Returns:
             SSE formatted string
         """
-        return f"id: {event.event_id}\nevent: {event.event_type}\ndata: {event.data}\n\n"
+        return f"id: {event.session_id}\nevent: {event.type}\ndata: {event.data}\n\n"

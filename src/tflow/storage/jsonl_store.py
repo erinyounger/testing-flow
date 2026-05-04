@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncIterator
 import json
+import asyncio
 from datetime import datetime
 
 
@@ -61,6 +62,7 @@ class ExecutionStore:
 
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = asyncio.Lock()
 
     def _get_file_path(self, workflow_id: str) -> Path:
         """Get file path for workflow.
@@ -73,7 +75,7 @@ class ExecutionStore:
         """
         return self.base_dir / f"{workflow_id}.jsonl"
 
-    def append(self, record: ExecutionRecord) -> bool:
+    async def append(self, record: ExecutionRecord) -> bool:
         """Append a record to the store.
 
         Args:
@@ -84,14 +86,15 @@ class ExecutionStore:
         """
         try:
             path = self._get_file_path(record.workflow_id)
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+            async with self._lock:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
             return True
         except Exception as e:
             print(f"Failed to append record: {e}")
             return False
 
-    def get(self, workflow_id: str) -> List[ExecutionRecord]:
+    async def get(self, workflow_id: str) -> List[ExecutionRecord]:
         """Get all records for a workflow.
 
         Args:
@@ -107,18 +110,19 @@ class ExecutionStore:
             return records
 
         try:
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data = json.loads(line)
-                        records.append(ExecutionRecord.from_dict(data))
+            async with self._lock:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            data = json.loads(line)
+                            records.append(ExecutionRecord.from_dict(data))
         except Exception as e:
             print(f"Failed to read records: {e}")
 
         return records
 
-    def get_latest(self, workflow_id: str) -> Optional[ExecutionRecord]:
+    async def get_latest(self, workflow_id: str) -> Optional[ExecutionRecord]:
         """Get the latest record for a workflow.
 
         Args:
@@ -127,10 +131,10 @@ class ExecutionStore:
         Returns:
             Latest record or None
         """
-        records = self.get(workflow_id)
+        records = await self.get(workflow_id)
         return records[-1] if records else None
 
-    def get_by_task(
+    async def get_by_task(
         self,
         workflow_id: str,
         task_id: str,
@@ -144,10 +148,10 @@ class ExecutionStore:
         Returns:
             List of matching records
         """
-        records = self.get(workflow_id)
+        records = await self.get(workflow_id)
         return [r for r in records if r.task_id == task_id]
 
-    def list_workflows(self) -> List[str]:
+    async def list_workflows(self) -> List[str]:
         """List all workflow IDs with records.
 
         Returns:
@@ -158,3 +162,12 @@ class ExecutionStore:
         except Exception as e:
             print(f"Failed to list workflows: {e}")
             return []
+
+    async def iter_sessions(self) -> AsyncIterator[str]:
+        """Iterate all session IDs.
+
+        Yields:
+            Session ID
+        """
+        for p in self.base_dir.glob("*.jsonl"):
+            yield p.stem

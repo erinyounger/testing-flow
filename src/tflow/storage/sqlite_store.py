@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import sqlite3
 import json
+import asyncio
 
 
 @dataclass
@@ -13,6 +14,7 @@ class SQLiteStoreConfig:
 
     db_path: Optional[str] = None
     timeout: int = 5
+    wal_mode: bool = True  # Write-Ahead Logging mode
 
 
 class SQLiteStore:
@@ -42,6 +44,7 @@ class SQLiteStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.db_path = db_path
+        self._lock = asyncio.Lock()
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -52,6 +55,8 @@ class SQLiteStore:
         """
         conn = sqlite3.connect(self.db_path, timeout=self.config.timeout)
         conn.row_factory = sqlite3.Row
+        if self.config.wal_mode:
+            conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _init_db(self) -> None:
@@ -96,7 +101,7 @@ class SQLiteStore:
         finally:
             conn.close()
 
-    def save_session(self, session_data: Dict[str, Any]) -> bool:
+    async def save_session(self, session_data: Dict[str, Any]) -> bool:
         """Save a session.
 
         Args:
@@ -105,6 +110,11 @@ class SQLiteStore:
         Returns:
             True if successful
         """
+        async with self._lock:
+            return await asyncio.to_thread(self._save_session_sync, session_data)
+
+    def _save_session_sync(self, session_data: Dict[str, Any]) -> bool:
+        """Synchronous save session."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -134,7 +144,7 @@ class SQLiteStore:
         finally:
             conn.close()
 
-    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get a session by ID.
 
         Args:
@@ -143,6 +153,11 @@ class SQLiteStore:
         Returns:
             Session data or None
         """
+        async with self._lock:
+            return await asyncio.to_thread(self._get_session_sync, session_id)
+
+    def _get_session_sync(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Synchronous get session."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -158,16 +173,31 @@ class SQLiteStore:
         finally:
             conn.close()
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    async def list_sessions(self, status: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
         """List all sessions.
+
+        Args:
+            status: Filter by status
+            limit: Maximum number of results
 
         Returns:
             List of session data
         """
+        async with self._lock:
+            return await asyncio.to_thread(self._list_sessions_sync, status, limit)
+
+    def _list_sessions_sync(self, status: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+        """Synchronous list sessions."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sessions ORDER BY created_at DESC")
+            if status:
+                cursor.execute(
+                    "SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                    (status, limit)
+                )
+            else:
+                cursor.execute("SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,))
             rows = cursor.fetchall()
             return [self._row_to_session(row) for row in rows]
         finally:
@@ -184,7 +214,7 @@ class SQLiteStore:
             "metadata": json.loads(row["metadata"] or "{}"),
         }
 
-    def save_task(self, task_data: Dict[str, Any]) -> bool:
+    async def save_task(self, task_data: Dict[str, Any]) -> bool:
         """Save a task.
 
         Args:
@@ -193,6 +223,11 @@ class SQLiteStore:
         Returns:
             True if successful
         """
+        async with self._lock:
+            return await asyncio.to_thread(self._save_task_sync, task_data)
+
+    def _save_task_sync(self, task_data: Dict[str, Any]) -> bool:
+        """Synchronous save task."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -232,7 +267,7 @@ class SQLiteStore:
         finally:
             conn.close()
 
-    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get a task by ID.
 
         Args:
@@ -241,6 +276,11 @@ class SQLiteStore:
         Returns:
             Task data or None
         """
+        async with self._lock:
+            return await asyncio.to_thread(self._get_task_sync, task_id)
+
+    def _get_task_sync(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Synchronous get task."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -256,38 +296,35 @@ class SQLiteStore:
         finally:
             conn.close()
 
-    def list_tasks(
-        self,
-        session_id: Optional[str] = None,
-        status: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """List tasks with optional filters.
+    async def get_tasks(self, session_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get tasks for a session.
 
         Args:
-            session_id: Filter by session
+            session_id: Session ID
             status: Filter by status
 
         Returns:
             List of task data
         """
+        async with self._lock:
+            return await asyncio.to_thread(self._get_tasks_sync, session_id, status)
+
+    def _get_tasks_sync(self, session_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Synchronous get tasks."""
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
 
-            query = "SELECT * FROM tasks WHERE 1=1"
-            params = []
-
-            if session_id:
-                query += " AND session_id = ?"
-                params.append(session_id)
-
             if status:
-                query += " AND status = ?"
-                params.append(status)
-
-            query += " ORDER BY created_at DESC"
-
-            cursor.execute(query, params)
+                cursor.execute(
+                    "SELECT * FROM tasks WHERE session_id = ? AND status = ? ORDER BY created_at",
+                    (session_id, status)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM tasks WHERE session_id = ? ORDER BY created_at",
+                    (session_id,)
+                )
             rows = cursor.fetchall()
             return [self._row_to_task(row) for row in rows]
         finally:
@@ -310,3 +347,7 @@ class SQLiteStore:
             "completed_at": row["completed_at"],
             "metadata": json.loads(row["metadata"] or "{}"),
         }
+
+    async def close(self) -> None:
+        """Close the store connection."""
+        pass  # SQLite connections are closed per-operation

@@ -26,21 +26,24 @@ class WorkflowEngine:
 
     def __init__(
         self,
+        job_manager=None,
+        agent_executor=None,
         workflow_id: Optional[str] = None,
-        name: Optional[str] = None,
         workflow_type: WorkflowType = WorkflowType.STANDARD,
         persistence: Optional[WorkflowPersistence] = None,
     ):
         """Initialize workflow engine.
 
         Args:
+            job_manager: JobManager instance for job state management.
+            agent_executor: AgentExecutor instance for running agents.
             workflow_id: Unique workflow ID. Auto-generated if not provided.
-            name: Workflow name.
             workflow_type: Type of workflow.
             persistence: Persistence layer. Created if not provided.
         """
+        self.job_manager = job_manager
+        self.agent_executor = agent_executor
         self.workflow_id = workflow_id or str(uuid.uuid4())
-        self.name = name or f"workflow-{self.workflow_id[:8]}"
         self.workflow_type = workflow_type
 
         self._persistence = persistence or WorkflowPersistence()
@@ -57,10 +60,11 @@ class WorkflowEngine:
             self._state = existing
         else:
             self._state = WorkflowState(
-                workflow_id=self.workflow_id,
-                name=self.name,
-                status=WorkflowStatus.IDLE,
                 workflow_type=self.workflow_type,
+                session_id=f"session-{self.workflow_id[:8]}",
+                status=WorkflowStatus.IDLE,
+                current_phase="idle",
+                workflow_id=self.workflow_id,
                 created_at=datetime.utcnow().isoformat(),
                 updated_at=datetime.utcnow().isoformat(),
             )
@@ -190,7 +194,7 @@ class WorkflowEngine:
         return False
 
     def cancel(self) -> bool:
-        """Cancel the workflow (any -> CANCELLED -> IDLE)."""
+        """Cancel the workflow (any -> FAILED)."""
         if self._state.status in [
             WorkflowStatus.PAUSED,
             WorkflowStatus.EXECUTING,
@@ -198,7 +202,8 @@ class WorkflowEngine:
             WorkflowStatus.VALIDATING,
             WorkflowStatus.PLANNING,
         ]:
-            self._state.status = WorkflowStatus.CANCELLED
+            self._state.status = WorkflowStatus.FAILED
+            self._state.error = "Cancelled by user"
             self._state.updated_at = datetime.utcnow().isoformat()
             self._persistence.save(self._state)
             return True
@@ -211,12 +216,6 @@ class WorkflowEngine:
         self._state.updated_at = datetime.utcnow().isoformat()
         self._persistence.save(self._state)
         return True
-
-    def set_progress(self, progress: float) -> None:
-        """Set workflow progress (0.0 - 1.0)."""
-        self._state.progress = max(0.0, min(1.0, progress))
-        self._state.updated_at = datetime.utcnow().isoformat()
-        self._persistence.save(self._state)
 
     def set_context(self, key: str, value: Any) -> None:
         """Set a context value."""

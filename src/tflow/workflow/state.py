@@ -25,9 +25,8 @@ class WorkflowType(Enum):
     """Workflow type enum."""
 
     STANDARD = "standard"
-    RESEARCH = "research"
-    BUILD = "build"
-    REVIEW = "review"
+    FULL = "full"
+    INIT = "init"
 
 
 # Valid state transitions
@@ -41,8 +40,7 @@ TRANSITIONS: Dict[WorkflowStatus, list[WorkflowStatus]] = {
     WorkflowStatus.COMPLETING: [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED],
     WorkflowStatus.COMPLETED: [],
     WorkflowStatus.FAILED: [WorkflowStatus.IDLE],
-    WorkflowStatus.PAUSED: [WorkflowStatus.EXECUTING, WorkflowStatus.CANCELLED],
-    WorkflowStatus.CANCELLED: [WorkflowStatus.IDLE],
+    WorkflowStatus.PAUSED: [WorkflowStatus.EXECUTING, WorkflowStatus.FAILED],
 }
 
 
@@ -53,46 +51,46 @@ class WorkflowState:
     Represents the runtime state of a workflow instance.
     """
 
-    workflow_id: str
-    name: str
-    status: WorkflowStatus = WorkflowStatus.IDLE
-    workflow_type: WorkflowType = WorkflowType.STANDARD
-    current_phase: Optional[str] = None
-    progress: float = 0.0
+    workflow_type: WorkflowType
+    session_id: str
+    status: WorkflowStatus
+    current_phase: str
+    workflow_id: str = ""
     context: Dict[str, Any] = field(default_factory=dict)
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    result: Dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+    created_at: str = ""
+    updated_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary."""
         return {
-            "workflow_id": self.workflow_id,
-            "name": self.name,
-            "status": self.status.value,
             "workflow_type": self.workflow_type.value,
+            "session_id": self.session_id,
+            "status": self.status.value,
             "current_phase": self.current_phase,
-            "progress": self.progress,
+            "workflow_id": self.workflow_id,
             "context": self.context,
+            "result": self.result,
+            "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "error": self.error,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowState":
         """Create state from dictionary."""
         return cls(
-            workflow_id=data["workflow_id"],
-            name=data["name"],
-            status=WorkflowStatus(data.get("status", "idle")),
             workflow_type=WorkflowType(data.get("workflow_type", "standard")),
-            current_phase=data.get("current_phase"),
-            progress=data.get("progress", 0.0),
+            session_id=data["session_id"],
+            status=WorkflowStatus(data.get("status", "idle")),
+            current_phase=data.get("current_phase", ""),
+            workflow_id=data.get("workflow_id", ""),
             context=data.get("context", {}),
-            created_at=data.get("created_at"),
-            updated_at=data.get("updated_at"),
+            result=data.get("result", {}),
             error=data.get("error"),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
         )
 
     def can_transition_to(self, new_status: WorkflowStatus) -> bool:

@@ -67,12 +67,12 @@ class TerminalBackend:
         result = self._run_tmux(["new-session", "-d", "-s", name])
         return result.returncode == 0
 
-    def send_command(
+    def send_input(
         self,
         command: str,
         session_name: Optional[str] = None,
     ) -> bool:
-        """Send command to tmux session.
+        """Send input to tmux session.
 
         Args:
             command: Command to send
@@ -84,6 +84,9 @@ class TerminalBackend:
         name = session_name or (self.config.session_name if self.config else "tflow-agent")
         result = self._run_tmux(["send-keys", "-t", name, command, "Enter"])
         return result.returncode == 0
+
+    # Alias for backward compatibility
+    send_command = send_input
 
     def capture_pane(
         self,
@@ -100,6 +103,16 @@ class TerminalBackend:
         name = session_name or (self.config.session_name if self.config else "tflow-agent")
         result = self._run_tmux(["capture-pane", "-t", name, "-p"])
         return result.stdout if result.returncode == 0 else ""
+
+    def _cleanup_session(self, session_name: Optional[str] = None) -> None:
+        """Clean up tmux session resources.
+
+        Args:
+            session_name: Session name
+        """
+        name = session_name or (self.config.session_name if self.config else "tflow-agent")
+        # Send exit command for graceful shutdown
+        self._run_tmux(["send-keys", "-t", name, "exit", "Enter"])
 
     def kill_session(self, session_name: Optional[str] = None) -> bool:
         """Kill a tmux session.

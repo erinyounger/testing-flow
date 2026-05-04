@@ -1051,55 +1051,25 @@ __all__ = [
 ```python
 """WorkflowEngine - 简单状态机工作流引擎"""
 
-from dataclasses import dataclass, field
-from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Awaitable
-import asyncio
-import uuid
+from typing import Optional, Callable, Dict, Any, List
 from datetime import datetime
+import uuid
 
-# 导入 Agent 相关类型 (来自 4.1 AgentExecutor)
-# 在实际实现中: from ..agents.registry import AgentType
-#               from ..core.executor import ExecutionMode, RunOptions
+from tflow.workflow.state import (
+    WorkflowState,
+    WorkflowStatus,
+    WorkflowType,
+    TRANSITIONS,
+)
+from tflow.workflow.persistence import WorkflowPersistence
 
-class WorkflowStatus(Enum):
-    """工作流状态"""
-    IDLE = "idle"
-    PARSING = "parsing"
-    VALIDATING = "validating"
-    PLANNING = "planning"
-    EXECUTING = "executing"
-    VERIFYING = "verifying"
-    COMPLETING = "completing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    PAUSED = "paused"
-
-@dataclass
-class WorkflowState:
-    """工作流状态快照"""
-    workflow_id: str
-    session_id: str
-    status: WorkflowStatus
-    current_phase: str = ""
-    context: dict[str, Any] = field(default_factory=dict)
-    result: dict[str, Any] = field(default_factory=dict)
-    created_at: str = ""
-    updated_at: str = ""
-
-@dataclass
-class PhaseResult:
-    """阶段执行结果"""
-    phase: str
-    success: bool
-    output: Any = None
-    error: str | None = None
+# Phase handler type
+PhaseHandler = Callable[["WorkflowEngine", WorkflowState], bool]
 
 class WorkflowEngine:
     """简单状态机工作流引擎
 
-    线性流程：PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED
+    线性流程：IDLE → PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED
 
     特点：
     - 简单线性状态机，适合固定顺序的流程
@@ -1108,494 +1078,171 @@ class WorkflowEngine:
     - 事件驱动便于扩展
     """
 
-    # 状态转换定义：当前状态 -> (下一状态, 是否结束)
-    TRANSITIONS = {
-        WorkflowStatus.IDLE: WorkflowStatus.PARSING,
-        WorkflowStatus.PARSING: WorkflowStatus.VALIDATING,
-        WorkflowStatus.VALIDATING: WorkflowStatus.PLANNING,
-        WorkflowStatus.PLANNING: WorkflowStatus.EXECUTING,
-        WorkflowStatus.EXECUTING: WorkflowStatus.VERIFYING,
-        WorkflowStatus.VERIFYING: WorkflowStatus.COMPLETING,
-        WorkflowStatus.COMPLETING: WorkflowStatus.COMPLETED,
-    }
-
     def __init__(
         self,
-        job_manager,           # JobManager 实例
-        agent_executor,         # AgentExecutor 实例
-        persistence: Any = None,  # 可选持久化
+        job_manager=None,
+        agent_executor=None,
+        workflow_id: Optional[str] = None,
+        workflow_type: WorkflowType = WorkflowType.STANDARD,
+        persistence: Optional[WorkflowPersistence] = None,
     ):
+        """初始化工作流引擎"""
         self.job_manager = job_manager
         self.agent_executor = agent_executor
-        self.persistence = persistence
+        self.workflow_id = workflow_id or str(uuid.uuid4())
+        self.workflow_type = workflow_type
+        self._persistence = persistence or WorkflowPersistence()
+        self._state: Optional[WorkflowState] = None
+        self._handlers: Dict[WorkflowStatus, List[PhaseHandler]] = {}
+        self._load_or_create_state()
 
-        # 阶段处理器
-        self._handlers: dict[WorkflowStatus, Callable] = {
-            WorkflowStatus.PARSING: self._handle_parsing,
-            WorkflowStatus.VALIDATING: self._handle_validating,
-            WorkflowStatus.PLANNING: self._handle_planning,
-            WorkflowStatus.EXECUTING: self._handle_executing,
-            WorkflowStatus.VERIFYING: self._handle_verifying,
-            WorkflowStatus.COMPLETING: self._handle_completing,
-        }
-
-        # 事件订阅
-        self._subscribers: list[Callable[[WorkflowState], None]] = []
-
-    async def execute(
-        self,
-        workflow_type: str,
-        goal: str,
-        scope: list[str] | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> WorkflowState:
-        """执行工作流"""
-        session_id = f"wf-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-        workflow_id = f"wf-{uuid.uuid4().hex[:12]}"
-
-        # 初始化状态
-        state = WorkflowState(
-            workflow_type=workflow_type,
-            workflow_id=workflow_id,
-            session_id=session_id,
-            status=WorkflowStatus.PARSING,
-            current_phase="parsing",
-            context={
-                "goal": goal,
-                "scope": scope or [],
-                "options": options or {},
-            },
-            created_at=datetime.now().isoformat(),
-            updated_at=datetime.now().isoformat(),
-        )
-
-        # 创建 Job
-        job = await self.job_manager.create_job(
-            job_type=f"workflow_{workflow_type.value}",
-            metadata={"session_id": session_id, "goal": goal},
-        )
-
-        state.context["job_id"] = job.job_id
-
-        # 持久化初始状态
-        if self.persistence:
-            self.persistence.save_state(state)
-
-        # 通知订阅者
-        self._emit(state)
-
-        # 执行状态机循环
-        try:
-            state = await self._run_loop(state)
-        except Exception as e:
-            state.status = WorkflowStatus.FAILED
-            state.result["error"] = str(e)
-
-        # 最终状态
-        state.updated_at = datetime.now().isoformat()
-        if self.persistence:
-            self.persistence.save_state(state)
-
-        # 更新 Job 状态
-        final_status = "completed" if state.status == WorkflowStatus.COMPLETED else "failed"
-        await self.job_manager.update_status(
-            job.job_id,
-            self._to_job_status(state.status),
-            "workflow_finished",
-            {"status": final_status, "result": state.result},
-        )
-
-        self._emit(state)
-        return state
-
-    async def _run_loop(self, state: WorkflowState) -> WorkflowState:
-        """状态机主循环"""
-        while state.status not in (WorkflowStatus.COMPLETED, WorkflowStatus.FAILED):
-            # 处理暂停状态
-            if state.status == WorkflowStatus.PAUSED:
-                # 等待恢复信号（实际实现中应该是队列或事件）
-                await asyncio.sleep(0.1)
-                continue
-
-            handler = self._handlers.get(state.status)
-            if handler is None:
-                state.status = WorkflowStatus.FAILED
-                state.result["error"] = f"No handler for status: {state.status}"
-                break
-
-            # 执行当前阶段
-            phase_result = await handler(state)
-
-            # 检查阶段执行是否成功，失败则立即停止
-            if not phase_result.success:
-                state.status = WorkflowStatus.FAILED
-                state.result["error"] = phase_result.error
-                state.updated_at = datetime.now().isoformat()
-                if self.persistence:
-                    self.persistence.save_state(state)
-                self._emit(state)
-                break
-
-            # 更新状态
-            next_status = self.TRANSITIONS.get(state.status)
-            if next_status is None:
-                state.status = WorkflowStatus.COMPLETED
-            else:
-                state.status = next_status
-
-            state.current_phase = state.status.value
-            state.updated_at = datetime.now().isoformat()
-
-            # 持久化（wave 执行完成为单位，避免中间状态不一致）
-            if self.persistence:
-                self.persistence.save_state(state)
-
-            # 通知订阅者
-            self._emit(state)
-
-        return state
-
-    async def pause(self, session_id: str) -> None:
-        """暂停工作流"""
-        state = self.persistence.load_state(session_id) if self.persistence else None
-        if not state:
-            raise ValueError(f"Session not found: {session_id}")
-
-        state.status = WorkflowStatus.PAUSED
-        state.updated_at = datetime.now().isoformat()
-
-        if self.persistence:
-            self.persistence.save_state(state)
-
-        # 同步更新 JobManager
-        job_id = state.context.get("job_id")
-        if job_id:
-            await self.job_manager.update_status(
-                job_id,
-                JobStatus.INPUT_REQUIRED,
-                "workflow_paused",
-                {"session_id": session_id},
+    def _load_or_create_state(self) -> None:
+        """加载或创建状态"""
+        existing = self._persistence.load(self.workflow_id)
+        if existing:
+            self._state = existing
+        else:
+            self._state = WorkflowState(
+                workflow_type=self.workflow_type,
+                session_id=f"session-{self.workflow_id[:8]}",
+                status=WorkflowStatus.IDLE,
+                current_phase="idle",
+                workflow_id=self.workflow_id,
+                created_at=datetime.utcnow().isoformat(),
+                updated_at=datetime.utcnow().isoformat(),
             )
+            self._persistence.save(self._state)
 
-        self._emit(state)
+    @property
+    def state(self) -> WorkflowState:
+        return self._state
 
-    async def resume(self, session_id: str) -> WorkflowState:
-        """恢复工作流"""
-        state = self.persistence.load_state(session_id) if self.persistence else None
-        if not state:
-            raise ValueError(f"Session not found: {session_id}")
+    @property
+    def status(self) -> WorkflowStatus:
+        return self._state.status
 
-        # 从暂停状态恢复到执行状态
-        # 如果有 current_phase，可以从该阶段继续
-        if state.status == WorkflowStatus.PAUSED:
-            # 恢复到上一个状态继续执行
-            state.status = WorkflowStatus.PLANNING  # 或根据 current_phase 推断
+    def register_handler(self, status: WorkflowStatus, handler: PhaseHandler) -> None:
+        """注册阶段处理器"""
+        if status not in self._handlers:
+            self._handlers[status] = []
+        self._handlers[status].append(handler)
 
-        state.updated_at = datetime.now().isoformat()
-
-        # 同步更新 JobManager
-        job_id = state.context.get("job_id")
-        if job_id:
-            await self.job_manager.update_status(
-                job_id,
-                JobStatus.RUNNING,
-                "workflow_resumed",
-                {"session_id": session_id},
-            )
-
-        # 继续状态机循环
-        return await self._run_loop(state)
-
-    async def cancel(self, session_id: str, force: bool = False) -> None:
-        """取消工作流
-
-        Args:
-            session_id: 会话 ID
-            force: 是否强制终止 (杀死运行中的进程)
-        """
-        state = self.persistence.load_state(session_id) if self.persistence else None
-        if not state:
-            raise ValueError(f"Session not found: {session_id}")
-
-        state.status = WorkflowStatus.FAILED
-        state.result["cancelled"] = True
-        state.result["force_cancelled"] = force
-        state.updated_at = datetime.now().isoformat()
-
-        if self.persistence:
-            self.persistence.save_state(state)
-
-        # 通知 JobManager 杀死相关进程
-        job_id = state.context.get("job_id")
-        if job_id and force:
-            # 强制模式下，通知 JobManager 终止相关任务
-            await self.job_manager.update_status(
-                job_id,
-                JobStatus.CANCELLED,
-                "force_cancelled",
-                {"force": True}
-            )
-
-        # 同步更新 JobManager
-        job_id = state.context.get("job_id")
-        if job_id:
-            await self.job_manager.update_status(
-                job_id,
-                JobStatus.CANCELLED,
-                "workflow_cancelled",
-                {"session_id": session_id},
-            )
-
-        self._emit(state)
-
-    def get_status(self, session_id: str) -> WorkflowState | None:
-        """查询工作流状态"""
-        return self.persistence.load_state(session_id) if self.persistence else None
-
-    def list_sessions(self) -> list[str]:
-        """列出所有工作流会话"""
-        if not self.persistence:
-            return []
-        # 从存储目录读取所有 session 文件
-        import os
-        sessions = []
-        for filename in os.listdir(self.persistence.storage_dir):
-            if filename.endswith(".json"):
-                sessions.append(filename[:-5])  # 去掉 .json
-        return sessions
-
-    async def _handle_parsing(self, state: WorkflowState) -> PhaseResult:
-        """解析阶段"""
-        try:
-            goal = state.context["goal"]
-            scope = state.context["scope"]
-
-            # 解析参数和目标
-            state.context["parsed_goal"] = goal
-            state.context["parsed_scope"] = scope
-
-            return PhaseResult(phase="parsing", success=True, output={"goal": goal, "scope": scope})
-        except Exception as e:
-            return PhaseResult(phase="parsing", success=False, error=str(e))
-
-    async def _handle_validating(self, state: WorkflowState) -> PhaseResult:
-        """验证阶段"""
-        try:
-            scope = state.context.get("parsed_scope", [])
-
-            # 验证项目结构
-            # TODO: 调用验证器
-
-            state.context["validation_passed"] = True
-            return PhaseResult(phase="validating", success=True, output={"valid": True})
-        except Exception as e:
-            return PhaseResult(phase="validating", success=False, error=str(e))
-
-    async def _handle_planning(self, state: WorkflowState) -> PhaseResult:
-        """规划阶段 - 调用 Planner Agent"""
-        try:
-            goal = state.context["parsed_goal"]
-            scope = state.context["parsed_scope"]
-
-            # 调用 Planner Agent
-            result = await self.agent_executor.run(
-                RunOptions(
-                    prompt=f"分析需求并制定测试计划: {goal}\n范围: {scope}",
-                    tool=AgentType.CLAUDE_CODE,
-                    mode=ExecutionMode.WRITE,
-                    work_dir=Path("."),
-                )
-            )
-
-            state.context["plan"] = result.output
-            state.result["plan"] = result.output
-
-            return PhaseResult(phase="planning", success=True, output=result.output)
-        except Exception as e:
-            return PhaseResult(phase="planning", success=False, error=str(e))
-
-    async def _handle_executing(self, state: WorkflowState) -> PhaseResult:
-        """执行阶段 - 支持 Waves 分批并行执行
-
-        plan.json 定义了 waves 结构:
-        {
-            "waves": [
-                {"wave": 1, "tasks": ["TASK-001", "TASK-002"]},
-                {"wave": 2, "tasks": ["TASK-003", "TASK-004"]},
-            ]
-        }
-
-        每个 wave 内的 tasks 可以并行执行，所有 wave 串行执行。
-        """
-        try:
-            plan = state.context.get("plan", {})
-            waves = plan.get("waves", [[]])  # 默认一个 wave 包含所有任务
-            tasks = state.context.get("tasks", [])
-
-            if not waves or waves == [[]]:
-                # 没有 waves 结构，降级为传统方式：整体执行
-                waves = [[t["id"] for t in tasks]] if tasks else [[]]
-
-            wave_results = []
-            total_tasks = sum(len(w["tasks"]) for w in waves)
-            completed_tasks = 0
-
-            for wave_idx, wave in enumerate(waves):
-                wave_tasks = wave.get("tasks", [])
-                wave_result = {
-                    "wave": wave_idx + 1,
-                    "tasks": [],
-                    "completed": 0,
-                    "failed": 0,
-                }
-
-                # 并行执行当前 wave 内的所有 tasks
-                async def execute_single_task(task_id: str) -> dict:
-                    task = next((t for t in tasks if t.get("id") == task_id), None)
-                    if not task:
-                        return {"task_id": task_id, "success": False, "error": "Task not found"}
-
-                    # 调用 Executor Agent 执行单个任务
-                    result = await self.agent_executor.run(
-                        RunOptions(
-                            prompt=f"执行任务 {task_id}:\n{task.get('description', '')}\n范围: {task.get('scope', '')}",
-                            tool=AgentType.CLAUDE_CODE,
-                            mode=ExecutionMode.WRITE,
-                            work_dir=Path("."),
-                        )
-                    )
-
-                    return {
-                        "task_id": task_id,
-                        "success": result.success,
-                        "output": result.output,
-                        "exit_code": result.exit_code,
-                    }
-
-                # 执行当前 wave 的所有任务（并行）
-                task_results = await asyncio.gather(
-                    *[execute_single_task(tid) for tid in wave_tasks],
-                    return_exceptions=True,
-                )
-
-                # 收集结果
-                for task_result in task_results:
-                    if isinstance(task_result, Exception):
-                        wave_result["failed"] += 1
-                        wave_result["tasks"].append({
-                            "error": str(task_result),
-                        })
-                    elif task_result.get("success"):
-                        wave_result["completed"] += 1
-                        wave_result["tasks"].append(task_result)
-                    else:
-                        wave_result["failed"] += 1
-                        wave_result["tasks"].append(task_result)
-
-                    completed_tasks += 1
-
-                # 更新进度
-                state.context["tasks_completed"] = completed_tasks
-                state.context["tasks_total"] = total_tasks
-
-                # 持久化进度
-                if self.persistence:
-                    self.persistence.save_state(state)
-
-                wave_results.append(wave_result)
-
-                # 如果当前 wave 有失败的任务，可以选择停止或继续
-                if wave_result["failed"] > 0 and state.context.get("options", {}).get("stop_on_failure"):
-                    break
-
-            state.result["waves"] = wave_results
-            state.result["execution"] = {
-                "total_tasks": total_tasks,
-                "completed_tasks": completed_tasks,
-                "wave_count": len(waves),
-                "wave_results": wave_results,
-            }
-
-            return PhaseResult(
-                phase="executing",
-                success=True,
-                output={
-                    "total_tasks": total_tasks,
-                    "completed_tasks": completed_tasks,
-                    "wave_count": len(waves),
-                },
-            )
-        except Exception as e:
-            return PhaseResult(phase="executing", success=False, error=str(e))
-
-    async def _handle_verifying(self, state: WorkflowState) -> PhaseResult:
-        """验证阶段 - 调用 Verifier Agent"""
-        try:
-            execution = state.result.get("execution", "")
-
-            # 调用 Verifier Agent
-            result = await self.agent_executor.run(
-                RunOptions(
-                    prompt=f"验证测试执行结果:\n{execution}",
-                    tool=AgentType.CLAUDE_CODE,
-                    mode=ExecutionMode.ANALYSIS,
-                    work_dir=Path("."),
-                )
-            )
-
-            state.result["verification"] = result.output
-
-            return PhaseResult(phase="verifying", success=True, output=result.output)
-        except Exception as e:
-            return PhaseResult(phase="verifying", success=False, error=str(e))
-
-    async def _handle_completing(self, state: WorkflowState) -> PhaseResult:
-        """完成阶段 - 生成总结"""
-        try:
-            # 汇总所有结果
-            summary = {
-                "goal": state.context.get("parsed_goal"),
-                "plan": state.result.get("plan"),
-                "execution": state.result.get("execution"),
-                "verification": state.result.get("verification"),
-            }
-
-            state.result["summary"] = summary
-
-            return PhaseResult(phase="completing", success=True, output=summary)
-        except Exception as e:
-            return PhaseResult(phase="completing", success=False, error=str(e))
-
-    def _to_job_status(self, status: WorkflowStatus) -> JobStatus:
-        """工作流状态 -> Job 状态"""
-        mapping = {
-            WorkflowStatus.PARSING: JobStatus.RUNNING,
-            WorkflowStatus.VALIDATING: JobStatus.RUNNING,
-            WorkflowStatus.PLANNING: JobStatus.RUNNING,
-            WorkflowStatus.EXECUTING: JobStatus.RUNNING,
-            WorkflowStatus.VERIFYING: JobStatus.RUNNING,
-            WorkflowStatus.COMPLETING: JobStatus.RUNNING,
-            WorkflowStatus.COMPLETED: JobStatus.COMPLETED,
-            WorkflowStatus.FAILED: JobStatus.FAILED,
-            WorkflowStatus.PAUSED: JobStatus.INPUT_REQUIRED,
-        }
-        return mapping.get(status, JobStatus.FAILED)
-
-    def subscribe(
-        self,
-        callback: Callable[[WorkflowState], None],
-    ) -> Callable[[], None]:
-        """订阅状态变化"""
-        self._subscribers.append(callback)
-        return lambda: self._subscribers.remove(callback)
-
-    def _emit(self, state: WorkflowState) -> None:
-        """通知订阅者"""
-        for callback in self._subscribers:
+    def _execute_handlers(self, status: WorkflowStatus) -> bool:
+        """执行所有处理器"""
+        handlers = self._handlers.get(status, [])
+        for handler in handlers:
             try:
-                callback(state)
-            except Exception:
-                pass
+                result = handler(self, self._state)
+                if not result:
+                    return False
+            except Exception as e:
+                print(f"Handler error for {status.value}: {e}")
+                self._state.error = str(e)
+                return False
+        return True
+
+    def transition_to(self, new_status: WorkflowStatus) -> bool:
+        """转换到新状态"""
+        if not self._state.can_transition_to(new_status):
+            print(f"Invalid transition: {self._state.status.value} -> {new_status.value}")
+            return False
+
+        old_status = self._state.status
+        self._state.status = new_status
+        self._state.updated_at = datetime.utcnow().isoformat()
+
+        if not self._execute_handlers(new_status):
+            self._state.status = old_status
+            return False
+
+        self._persistence.save(self._state)
+        return True
+
+    def start(self) -> bool:
+        """启动工作流 (IDLE → PARSING)"""
+        return self.transition_to(WorkflowStatus.PARSING)
+
+    def parse(self) -> bool:
+        """解析阶段 (PARSING → VALIDATING)"""
+        return self.transition_to(WorkflowStatus.VALIDATING)
+
+    def validate(self) -> bool:
+        """验证阶段 (VALIDATING → PLANNING)"""
+        return self.transition_to(WorkflowStatus.PLANNING)
+
+    def plan(self) -> bool:
+        """规划阶段 (PLANNING → EXECUTING)"""
+        return self.transition_to(WorkflowStatus.EXECUTING)
+
+    def execute(self) -> bool:
+        """执行阶段 (EXECUTING → VERIFYING)"""
+        return self.transition_to(WorkflowStatus.VERIFYING)
+
+    def verify(self) -> bool:
+        """验证阶段 (VERIFYING → COMPLETING)"""
+        return self.transition_to(WorkflowStatus.COMPLETING)
+
+    def complete(self) -> bool:
+        """完成阶段 (COMPLETING → COMPLETED)"""
+        return self.transition_to(WorkflowStatus.COMPLETED)
+
+    def fail(self, error: Optional[str] = None) -> bool:
+        """标记工作流失败"""
+        if error:
+            self._state.error = error
+        return self.transition_to(WorkflowStatus.FAILED)
+
+    def pause(self) -> bool:
+        """暂停工作流（仅从 EXECUTING）"""
+        if self._state.status == WorkflowStatus.EXECUTING:
+            self._state.status = WorkflowStatus.PAUSED
+            self._state.updated_at = datetime.utcnow().isoformat()
+            self._persistence.save(self._state)
+            return True
+        return False
+
+    def resume(self) -> bool:
+        """恢复工作流（PAUSED → EXECUTING）"""
+        if self._state.status == WorkflowStatus.PAUSED:
+            self._state.status = WorkflowStatus.EXECUTING
+            self._state.updated_at = datetime.utcnow().isoformat()
+            self._persistence.save(self._state)
+            return True
+        return False
+
+    def cancel(self) -> bool:
+        """取消工作流（任意 → FAILED）"""
+        if self._state.status in [
+            WorkflowStatus.PAUSED,
+            WorkflowStatus.EXECUTING,
+            WorkflowStatus.PARSING,
+            WorkflowStatus.VALIDATING,
+            WorkflowStatus.PLANNING,
+        ]:
+            self._state.status = WorkflowStatus.FAILED
+            self._state.error = "Cancelled by user"
+            self._state.updated_at = datetime.utcnow().isoformat()
+            self._persistence.save(self._state)
+            return True
+        return False
+
+    def reset(self) -> bool:
+        """重置工作流到 IDLE 状态"""
+        self._state.status = WorkflowStatus.IDLE
+        self._state.error = None
+        self._state.updated_at = datetime.utcnow().isoformat()
+        self._persistence.save(self._state)
+        return True
+
+    def set_context(self, key: str, value: Any) -> None:
+        """设置上下文值"""
+        self._state.context[key] = value
+        self._state.updated_at = datetime.utcnow().isoformat()
+        self._persistence.save(self._state)
+
+    def get_context(self, key: str, default: Any = None) -> Any:
+        """获取上下文值"""
+        return self._state.context.get(key, default)
 ```
 
 ---
@@ -1605,11 +1252,9 @@ class WorkflowEngine:
 ```python
 """工作流状态定义"""
 
-from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
-import json
-from pathlib import Path
+from dataclasses import dataclass, field, asdict
+from typing import Optional, Dict, Any
 
 class WorkflowType(Enum):
     """工作流类型"""
@@ -1629,6 +1274,21 @@ class WorkflowStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PAUSED = "paused"
+    CANCELLED = "cancelled"
+
+# 有效状态转换
+TRANSITIONS: Dict[WorkflowStatus, list[WorkflowStatus]] = {
+    WorkflowStatus.IDLE: [WorkflowStatus.PARSING],
+    WorkflowStatus.PARSING: [WorkflowStatus.VALIDATING, WorkflowStatus.FAILED],
+    WorkflowStatus.VALIDATING: [WorkflowStatus.PLANNING, WorkflowStatus.FAILED],
+    WorkflowStatus.PLANNING: [WorkflowStatus.EXECUTING, WorkflowStatus.FAILED],
+    WorkflowStatus.EXECUTING: [WorkflowStatus.VERIFYING, WorkflowStatus.FAILED],
+    WorkflowStatus.VERIFYING: [WorkflowStatus.COMPLETING, WorkflowStatus.FAILED],
+    WorkflowStatus.COMPLETING: [WorkflowStatus.COMPLETED, WorkflowStatus.FAILED],
+    WorkflowStatus.COMPLETED: [],
+    WorkflowStatus.FAILED: [WorkflowStatus.IDLE],
+    WorkflowStatus.PAUSED: [WorkflowStatus.EXECUTING, WorkflowStatus.FAILED],
+}
 
 @dataclass
 class WorkflowState:
@@ -1637,20 +1297,20 @@ class WorkflowState:
     session_id: str
     status: WorkflowStatus
     current_phase: str
-    workflow_id: str = ""  # 内部工作流标识
-    context: dict[str, Any] = field(default_factory=dict)
-    result: dict[str, Any] = field(default_factory=dict)
-    error: str | None = None
+    workflow_id: str = ""
+    context: Dict[str, Any] = field(default_factory=dict)
+    result: Dict[str, Any] = field(default_factory=dict)
+    error: Optional[str] = None
     created_at: str = ""
     updated_at: str = ""
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "workflow_type": self.workflow_type.value,
-            "workflow_id": self.workflow_id,
             "session_id": self.session_id,
             "status": self.status.value,
             "current_phase": self.current_phase,
+            "workflow_id": self.workflow_id,
             "context": self.context,
             "result": self.result,
             "error": self.error,
@@ -1659,13 +1319,13 @@ class WorkflowState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WorkflowState":
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowState":
         return cls(
-            workflow_type=WorkflowType(data["workflow_type"]),
-            workflow_id=data.get("workflow_id", ""),
+            workflow_type=WorkflowType(data.get("workflow_type", "standard")),
             session_id=data["session_id"],
-            status=WorkflowStatus(data["status"]),
-            current_phase=data["current_phase"],
+            status=WorkflowStatus(data.get("status", "idle")),
+            current_phase=data.get("current_phase", ""),
+            workflow_id=data.get("workflow_id", ""),
             context=data.get("context", {}),
             result=data.get("result", {}),
             error=data.get("error"),
@@ -1673,29 +1333,26 @@ class WorkflowState:
             updated_at=data.get("updated_at", ""),
         )
 
-class WorkflowPersistence:
-    """工作流持久化"""
+    def can_transition_to(self, new_status: WorkflowStatus) -> bool:
+        """检查是否可转换到新状态"""
+        allowed = TRANSITIONS.get(self.status, [])
+        return new_status in allowed
 
-    def __init__(self, storage_dir: str | Path = ".workflow/sessions"):
-        self.storage_dir = Path(storage_dir)
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+    def transition_to(self, new_status: WorkflowStatus) -> bool:
+        """转换到新状态"""
+        if self.can_transition_to(new_status):
+            self.status = new_status
+            self.updated_at = None  # 由持久化层设置
+            return True
+        return False
 
-    def save_state(self, state: WorkflowState) -> None:
-        """保存状态"""
-        path = self._get_path(state.session_id)
-        with open(path, "w") as f:
-            json.dump(state.to_dict(), f, indent=2)
+    def set_context(self, key: str, value: Any) -> None:
+        """设置上下文值"""
+        self.context[key] = value
 
-    def load_state(self, session_id: str) -> WorkflowState | None:
-        """加载状态"""
-        path = self._get_path(session_id)
-        if not path.exists():
-            return None
-        with open(path) as f:
-            return WorkflowState.from_dict(json.load(f))
-
-    def _get_path(self, session_id: str) -> Path:
-        return self.storage_dir / f"{session_id}.json"
+    def get_context(self, key: str, default: Any = None) -> Any:
+        """获取上下文值"""
+        return self.context.get(key, default)
 ```
 
 ---
@@ -1706,13 +1363,15 @@ class WorkflowPersistence:
 """Agent 注册表 - 包含具体 Agent 实现"""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List, Any
 import subprocess
-import asyncio
+import signal
+import os
 
 class AgentType(Enum):
+    """Agent 类型"""
     CLAUDE_CODE = "claude-code"
     GEMINI = "gemini"
     QWEN = "qwen"
@@ -1720,261 +1379,198 @@ class AgentType(Enum):
     OPENCODE = "opencode"
 
 class ExecutionMode(Enum):
-    ANALYSIS = "analysis"
-    WRITE = "write"
+    """Agent 执行模式"""
+    DIRECT = "direct"
+    TERMINAL = "terminal"
+    MCP = "mcp"
 
 @dataclass
 class AgentConfig:
-    type: AgentType
-    prompt: str
-    work_dir: str
-    model: str | None = None
-    approval_mode: str = "suggest"  # "suggest" | "auto"
+    """Agent 配置"""
+    agent_type: AgentType
+    name: str
+    description: str
+    execution_mode: ExecutionMode = ExecutionMode.DIRECT
+    command: Optional[str] = None
+    env: Dict[str, str] = field(default_factory=dict)
+    working_dir: Optional[str] = None
+    timeout: int = 300
+    max_retries: int = 3
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        if not self.command:
+            self.command = self._default_command()
+
+    def _default_command(self) -> Optional[str]:
+        commands = {
+            AgentType.CLAUDE_CODE: "claude",
+            AgentType.GEMINI: "gemini",
+            AgentType.QWEN: "qwen",
+            AgentType.CODEX: "codex",
+            AgentType.OPENCODE: "opencode",
+        }
+        return commands.get(self.agent_type)
+
+@dataclass
 class AgentProcess:
     """Agent 进程封装"""
+    pid: int
+    process: subprocess.Popen
+    command: List[str]
+    started_at: Optional[str] = None
 
-    def __init__(self, process: subprocess.Popen, agent_type: AgentType, exec_id: str):
-        self.process = process
-        self.agent_type = agent_type
-        self.exec_id = exec_id
-        self._output = ""
+    def is_alive(self) -> bool:
+        if self.process is None:
+            return False
+        return self.process.poll() is None
 
-    def stop(self) -> None:
+    def stop(self, timeout: int = 5) -> bool:
         """停止进程"""
-        self.process.terminate()
+        if self.process is None:
+            return True
+        try:
+            self.process.terminate()
+            self.process.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            return False
+        except Exception:
+            return False
 
-    async def wait(self) -> int:
-        """等待完成"""
-        self._output, _ = self.process.communicate()
-        return self.process.returncode
-
-    def get_output(self) -> str:
-        """获取输出"""
-        return self._output
+    def send_input(self, data: str) -> bool:
+        """发送输入到进程"""
+        if self.process and self.process.stdin:
+            try:
+                self.process.stdin.write(data + "\n")
+                self.process.stdin.flush()
+                return True
+            except Exception:
+                return False
+        return False
 
 class BaseAgent(ABC):
     """Agent 抽象基类"""
 
+    def __init__(self, config: AgentConfig):
+        self.config = config
+        self._process: Optional[AgentProcess] = None
+
+    @property
+    def name(self) -> str:
+        return self.config.name
+
+    @property
+    def agent_type(self) -> AgentType:
+        return self.config.agent_type
+
     @abstractmethod
-    async def spawn(self, config: AgentConfig) -> AgentProcess:
+    def spawn(self, task: Dict[str, Any]) -> AgentProcess:
         """启动 Agent 进程"""
         pass
 
     @abstractmethod
-    async def stop(self, process_id: str) -> None:
-        """停止 Agent"""
+    def on_entry(self, task: Dict[str, Any]) -> None:
+        """当 Agent 被分配任务时调用"""
         pass
 
-    @abstractmethod
-    def on_entry(
-        self,
-        process_id: str,
-        callback: Callable[[dict], None],
-    ) -> Callable[[], None]:
-        """订阅进程事件"""
-        pass
+    def stop(self) -> bool:
+        """停止 Agent 进程"""
+        if self._process:
+            return self._process.stop()
+        return True
 
+    def get_process(self) -> Optional[AgentProcess]:
+        """获取当前进程"""
+        return self._process
 
-# =============================================================================
 # 具体 Agent 实现
-# =============================================================================
 
 class ClaudeAgent(BaseAgent):
-    """Claude Code Agent 实现"""
-
-    _processes: dict[str, subprocess.Popen] = {}
-
-    async def spawn(self, config: AgentConfig) -> AgentProcess:
-        cmd = ["claude", "-p", config.prompt, "--no-input"]
-        if config.model:
-            cmd.extend(["--model", config.model])
-
+    def spawn(self, task: Dict[str, Any]) -> AgentProcess:
+        cmd = [self.config.command or "claude"]
+        if task.get("prompt"):
+            cmd.extend(["--prompt", task["prompt"]])
+        env = os.environ.copy()
+        env.update(self.config.env)
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            cwd=config.work_dir,
-            text=True,
+            stdin=subprocess.PIPE,
+            env=env,
+            cwd=self.config.working_dir,
         )
-        exec_id = f"claude-{process.pid}"
-        self._processes[exec_id] = process
-        return AgentProcess(process, AgentType.CLAUDE_CODE, exec_id)
+        self._process = AgentProcess(pid=process.pid, process=process, command=cmd)
+        return self._process
 
-    async def stop(self, process_id: str) -> None:
-        if process_id in self._processes:
-            self._processes[process_id].terminate()
-            del self._processes[process_id]
-
-    def on_entry(self, process_id: str, callback: Callable[[dict], None]) -> Callable[[], None]:
-        # Claude Code 不支持实时输出流，返回空函数
-        return lambda: None
-
+    def on_entry(self, task: Dict[str, Any]) -> None:
+        pass
 
 class GeminiAgent(BaseAgent):
-    """Gemini Agent 实现"""
-
-    _processes: dict[str, subprocess.Popen] = {}
-
-    async def spawn(self, config: AgentConfig) -> AgentProcess:
-        cmd = ["gemini", "-p", config.prompt]
-        if config.model:
-            cmd.extend(["--model", config.model])
-
+    def spawn(self, task: Dict[str, Any]) -> AgentProcess:
+        cmd = [self.config.command or "gemini"]
+        if task.get("prompt"):
+            cmd.extend(["--prompt", task["prompt"]])
+        env = os.environ.copy()
+        env.update(self.config.env)
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            cwd=config.work_dir,
-            text=True,
+            stdin=subprocess.PIPE,
+            env=env,
+            cwd=self.config.working_dir,
         )
-        exec_id = f"gemini-{process.pid}"
-        self._processes[exec_id] = process
-        return AgentProcess(process, AgentType.GEMINI, exec_id)
+        self._process = AgentProcess(pid=process.pid, process=process, command=cmd)
+        return self._process
 
-    async def stop(self, process_id: str) -> None:
-        if process_id in self._processes:
-            self._processes[process_id].terminate()
-            del self._processes[process_id]
+    def on_entry(self, task: Dict[str, Any]) -> None:
+        pass
 
-    def on_entry(self, process_id: str, callback: Callable[[dict], None]) -> Callable[[], None]:
-        return lambda: None
-
-
-class QwenAgent(BaseAgent):
-    """Qwen Agent 实现"""
-
-    _processes: dict[str, subprocess.Popen] = {}
-
-    async def spawn(self, config: AgentConfig) -> AgentProcess:
-        cmd = ["qwen", "chat", "-p", config.prompt]
-        if config.model:
-            cmd.extend(["--model", config.model])
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=config.work_dir,
-            text=True,
-        )
-        exec_id = f"qwen-{process.pid}"
-        self._processes[exec_id] = process
-        return AgentProcess(process, AgentType.QWEN, exec_id)
-
-    async def stop(self, process_id: str) -> None:
-        if process_id in self._processes:
-            self._processes[process_id].terminate()
-            del self._processes[process_id]
-
-    def on_entry(self, process_id: str, callback: Callable[[dict], None]) -> Callable[[], None]:
-        return lambda: None
-
-
-class CodexAgent(BaseAgent):
-    """Codex Agent 实现"""
-
-    _processes: dict[str, subprocess.Popen] = {}
-
-    async def spawn(self, config: AgentConfig) -> AgentProcess:
-        cmd = ["codex", f"'{config.prompt}'"]
-        if config.model:
-            cmd.extend(["--language", config.model])
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=config.work_dir,
-            text=True,
-        )
-        exec_id = f"codex-{process.pid}"
-        self._processes[exec_id] = process
-        return AgentProcess(process, AgentType.CODEX, exec_id)
-
-    async def stop(self, process_id: str) -> None:
-        if process_id in self._processes:
-            self._processes[process_id].terminate()
-            del self._processes[process_id]
-
-    def on_entry(self, process_id: str, callback: Callable[[dict], None]) -> Callable[[], None]:
-        return lambda: None
-
-
-class OpencodeAgent(BaseAgent):
-    """OpenCode Agent 实现"""
-
-    _processes: dict[str, subprocess.Popen] = {}
-
-    async def spawn(self, config: AgentConfig) -> AgentProcess:
-        cmd = ["opencode", "-p", config.prompt]
-        if config.model:
-            cmd.extend(["--model", config.model])
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=config.work_dir,
-            text=True,
-        )
-        exec_id = f"opencode-{process.pid}"
-        self._processes[exec_id] = process
-        return AgentProcess(process, AgentType.OPENCODE, exec_id)
-
-    async def stop(self, process_id: str) -> None:
-        if process_id in self._processes:
-            self._processes[process_id].terminate()
-            del self._processes[process_id]
-
-    def on_entry(self, process_id: str, callback: Callable[[dict], None]) -> Callable[[], None]:
-        return lambda: None
-
+# ... 其他 Agent 类似实现
 
 class AgentRegistry:
     """Agent 注册表 - 单例模式"""
 
-    _instance = None
+    _instance: Optional["AgentRegistry"] = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            cls._instance._agents: Dict[str, BaseAgent] = {}
+            cls._instance._configs: Dict[str, AgentConfig] = {}
         return cls._instance
 
-    def __init__(self):
-        if self._initialized:
-            return
-        self._agents: dict[AgentType, BaseAgent] = {}
-        self._register_default_agents()
-        self._initialized = True
+    def register(self, agent: BaseAgent) -> None:
+        self._agents[agent.name] = agent
+        self._configs[agent.name] = agent.config
 
-    def _register_default_agents(self) -> None:
-        """注册所有默认 Agent"""
-        self._agents = {
-            AgentType.CLAUDE_CODE: ClaudeAgent(),
-            AgentType.GEMINI: GeminiAgent(),
-            AgentType.QWEN: QwenAgent(),
-            AgentType.CODEX: CodexAgent(),
-            AgentType.OPENCODE: OpencodeAgent(),
-        }
+    def get(self, name: str) -> Optional[BaseAgent]:
+        return self._agents.get(name)
 
-    def register(self, agent_type: AgentType, agent: BaseAgent) -> None:
-        """注册 Agent"""
-        self._agents[agent_type] = agent
+    def get_config(self, name: str) -> Optional[AgentConfig]:
+        return self._configs.get(name)
 
-    def get(self, agent_type: AgentType) -> BaseAgent:
-        """获取 Agent 实例"""
-        if agent_type not in self._agents:
-            raise ValueError(f"Agent not registered: {agent_type}")
-        return self._agents[agent_type]
-
-    def list_agents(self) -> list[AgentType]:
-        """列出所有已注册的 Agent"""
+    def list_agents(self) -> List[str]:
         return list(self._agents.keys())
 
+    def create_agent(self, config: AgentConfig) -> BaseAgent:
+        agent_classes = {
+            AgentType.CLAUDE_CODE: ClaudeAgent,
+            AgentType.GEMINI: GeminiAgent,
+            AgentType.QWEN: QwenAgent,
+            AgentType.CODEX: CodexAgent,
+            AgentType.OPENCODE: OpencodeAgent,
+        }
+        agent_class = agent_classes.get(config.agent_type)
+        if not agent_class:
+            raise ValueError(f"Unknown agent type: {config.agent_type}")
+        agent = agent_class(config)
+        self.register(agent)
+        return agent
 
-# 全局注册表实例
 agent_registry = AgentRegistry()
 ```
 
@@ -1983,88 +1579,123 @@ agent_registry = AgentRegistry()
 ```python
 """直连模式 - 直接 spawn 子进程"""
 
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List, AsyncIterator
+import subprocess
+import os
 import asyncio
-import signal
-from dataclasses import dataclass, field
-from typing import AsyncIterator
 
 @dataclass
 class DirectBackendConfig:
     """直连后端配置"""
-    timeout: int = 300  # 超时秒数
-    max_output: int = 100_000  # 最大输出字符数
-    env: dict = field(default_factory=dict)
+    command: List[str]
+    env: Optional[Dict[str, str]] = None
+    cwd: Optional[str] = None
+    timeout: int = 300
+    shell: bool = False
 
 class DirectBackend:
     """直连模式 - 直接 spawn 子进程执行 agent"""
 
-    def __init__(self, config: DirectBackendConfig | None = None):
-        self.config = config or DirectBackendConfig()
-        self._process: asyncio.subprocess.Process | None = None
+    def __init__(self, config: Optional[DirectBackendConfig] = None):
+        self.config = config
+        self._process: Optional[asyncio.subprocess.Process] = None
 
     async def execute(
         self,
-        command: list[str],
-        stdin_data: str | None = None,
-        cwd: str | None = None,
+        command: Optional[List[str]] = None,
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
     ) -> AsyncIterator[str]:
         """执行命令并yield输出"""
-        env = {**self.config.env}
-        self._process = await asyncio.create_subprocess_exec(
-            *command,
-            stdin=asyncio.subprocess.PIPE if stdin_data else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=cwd,
-            env=env,
-        )
+        if command is None and self.config:
+            command = self.config.command
+        if env is None and self.config:
+            env = self.config.env
+        if cwd is None and self.config:
+            cwd = self.config.cwd
+        if timeout is None and self.config:
+            timeout = self.config.timeout
 
-        output_lines = []
+        if not command:
+            raise ValueError("No command provided")
+
+        exec_env = os.environ.copy()
+        if env:
+            exec_env.update(env)
+
         try:
-            if stdin_data and self._process.stdin:
-                self._process.stdin.write(stdin_data.encode())
-                await self._process.stdin.drain()
-                self._process.stdin.close()
-
-            # 实时读取输出
-            while True:
-                line = await self._process.stdout.readline()
-                if not line:
-                    break
-                decoded = line.decode(errors="replace")
-                output_lines.append(decoded)
-                if len("".join(output_lines)) > self.config.max_output:
-                    yield "[Output truncated - exceeds max_output]\n"
-                    break
-                yield decoded
-
-            # 等待进程结束
-            returncode = await asyncio.wait_for(
-                self._process.wait(),
-                timeout=self.config.timeout
+            self._process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=exec_env,
+                cwd=cwd,
+                shell=self.config.shell if self.config else False,
             )
-            yield f"\n[Process exited with code {returncode}]\n"
 
-        except asyncio.TimeoutError:
-            self._process.kill()
-            yield "\n[Process killed - timeout]\n"
+            try:
+                # 读取 stdout
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            self._process.stdout.read(1024),
+                            timeout=0.1,
+                        )
+                        if chunk:
+                            yield chunk.decode(errors="replace")
+                        else:
+                            break
+                    except asyncio.TimeoutError:
+                        if self._process.returncode is not None:
+                            break
+                        continue
+
+                # 读取 stderr
+                stderr_bytes = await self._process.stderr.read()
+                if stderr_bytes:
+                    yield f"\n[stderr] {stderr_bytes.decode(errors='replace')}"
+
+                # 等待进程结束
+                await self._process.wait()
+                yield f"\n[exit code: {self._process.returncode}]"
+
+            except asyncio.TimeoutError:
+                if self._process:
+                    self._process.kill()
+                    await self._process.wait()
+                yield f"\n[timeout: command timed out after {timeout}s]"
+        except Exception as e:
+            yield f"\n[error: {str(e)}]"
         finally:
             self._process = None
 
-    async def kill(self) -> None:
+    def kill(self) -> bool:
         """强制终止进程"""
-        if self._process:
+        if self._process and self._process.poll() is None:
             try:
-                self._process.send_signal(signal.SIGTERM)
-                await asyncio.wait_for(self._process.wait(), timeout=5)
-            except asyncio.TimeoutError:
                 self._process.kill()
-            finally:
-                self._process = None
+                return True
+            except Exception:
+                return False
+        return False
 
     def is_running(self) -> bool:
         """检查进程是否在运行"""
-        return self._process is not None and self._process.returncode is None
+        if self._process:
+            return self._process.poll() is None
+        return False
+
+    def execute_sync(
+        self,
+        command: Optional[List[str]] = None,
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """同步执行命令"""
+        # 实现同步版本...
 ```
 
 ### 4.5.2 TerminalBackend (`agents/backends/terminal.py`)
@@ -2074,54 +1705,45 @@ class DirectBackend:
 
 import asyncio
 import re
-import signal
 from dataclasses import dataclass, field
-from typing import AsyncIterator
+from typing import Optional, Dict, Any, List, AsyncIterator
 
 @dataclass
 class TerminalBackendConfig:
     """终端后端配置"""
     session_name: str = "tflow-agent"
-    socket_name: str | None = None  # tmux socket name
+    socket_name: Optional[str] = None
     window_name: str = "agent"
-    keep_session: bool = True  # 任务完成后保持 session
-    timeout: int = 3600  # 默认1小时超时
+    keep_session: bool = True
+    timeout: int = 3600
 
 class TerminalBackend:
     """终端模式 - 通过 tmux/wezterm 运行 agent"""
 
-    def __init__(self, config: TerminalBackendConfig | None = None):
+    def __init__(self, config: Optional[TerminalBackendConfig] = None):
         self.config = config or TerminalBackendConfig()
-        self._session_id: str | None = None
-        self._panes: dict[str, asyncio.StreamReader] = {}
-
-    def _build_tmux_command(self, command: list[str]) -> list[str]:
-        """构建 tmux 命令"""
-        base = ["tmux", "new-session", "-d", "-s", self.config.session_name]
-        if self.config.socket_name:
-            base.extend(["-L", self.config.socket_name])
-        # 添加初始命令
-        escaped_cmd = " ".join(f"'{c}'" for c in command)
-        base.extend(["bash", "-c", escaped_cmd])
-        return base
+        self._session_id: Optional[str] = None
+        self._process: Optional[asyncio.subprocess.Process] = None
 
     async def execute(
         self,
-        command: list[str],
-        stdin_data: str | None = None,
-        cwd: str | None = None,
+        command: List[str],
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
     ) -> AsyncIterator[str]:
         """通过 tmux session 执行命令"""
         session = self.config.session_name
-        pane_cmd = ["tmux", "send-keys", "-t", session]
 
-        if cwd:
-            pane_cmd.extend([f"cd '{cwd}' &&", "Enter"])
+        # 构建 tmux 命令
+        escaped_cmd = " ".join(f"'{c}'" for c in command)
+        tmux_cmd = [
+            "tmux", "new-session", "-d", "-s", session,
+            "bash", "-c", escaped_cmd
+        ]
 
         # 启动 tmux session
-        init_cmd = self._build_tmux_command(command)
         proc = await asyncio.create_subprocess_exec(
-            *init_cmd,
+            *tmux_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -2129,34 +1751,17 @@ class TerminalBackend:
 
         self._session_id = session
 
-        # 发送命令
-        full_cmd = " ".join(f"'{c}'" for c in command)
-        send_cmd = pane_cmd + [full_cmd, "Enter"]
-        await asyncio.create_subprocess_exec(
-            *send_cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-
-        # 捕获输出 (通过 tail -f)
-        capture_cmd = [
-            "tmux", "capture-pane", "-t", session, "-p"
-        ]
-        capture_proc = await asyncio.create_subprocess_exec(
-            *capture_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        output_lines = []
+        # 捕获输出
+        capture_cmd = ["tmux", "capture-pane", "-t", session, "-p"]
         last_output = ""
         timeout_count = 0
-        max_timeout = self.config.timeout // 5  # 每5秒检查一次
+        max_timeout = self.config.timeout // 5
 
         try:
             while timeout_count < max_timeout:
                 await asyncio.sleep(5)
-                # 检查 session 是否还存在
+
+                # 检查 session 是否存在
                 check = await asyncio.create_subprocess_exec(
                     "tmux", "has-session", "-t", session,
                     stdout=asyncio.subprocess.DEVNULL,
@@ -2167,7 +1772,7 @@ class TerminalBackend:
                     if not self.config.keep_session:
                         break
 
-                # 获取最新输出
+                # 获取输出
                 capture_proc = await asyncio.create_subprocess_exec(
                     *capture_cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -2176,26 +1781,19 @@ class TerminalBackend:
                 stdout, _ = await capture_proc.communicate()
                 current = stdout.decode(errors="replace")
 
-                # 检测新输出
                 if current != last_output:
                     new_content = current[len(last_output):]
-                    output_lines.append(new_content)
                     last_output = current
                     yield new_content
                     timeout_count = 0
 
-                    # 检查是否完成 (检测命令提示符或特定完成标志)
-                    if re.search(r"(?:\$|#)\s*$", new_content) or "[Done]" in new_content:
+                    if re.search(r"(?:\$|#)\s*$", new_content):
                         break
                 else:
                     timeout_count += 1
 
         except asyncio.TimeoutError:
             yield "\n[Session timeout]\n"
-
-        # 清理 session
-        if not self.config.keep_session:
-            await self._cleanup_session(session)
 
     async def _cleanup_session(self, session: str) -> None:
         """清理 tmux session"""
@@ -2216,7 +1814,7 @@ class TerminalBackend:
         )
         await proc.wait()
 
-    async def kill_session(self, session: str | None = None) -> None:
+    async def kill_session(self, session: Optional[str] = None) -> None:
         """终止 session"""
         target = session or self._session_id
         if target:
@@ -2337,108 +1935,110 @@ class SpecLoader:
 ```python
 """执行历史存储 - JSONL 实现"""
 
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, AsyncIterator
-import asyncio
+from typing import Optional, List, Dict, Any, AsyncIterator
 import json
+import asyncio
+from datetime import datetime
 
 @dataclass
 class ExecutionRecord:
     """执行记录"""
-    session_id: str
-    timestamp: str
-    phase: str
+    execution_id: str
+    workflow_id: str
+    task_id: str
+    agent_id: str
     status: str
-    input: dict[str, Any]
-    output: dict[str, Any] | None = None
-    error: str | None = None
-    duration_ms: int | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    input_data: Dict[str, Any]
+    output_data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    duration_ms: Optional[int] = None
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+        if not self.started_at:
+            self.started_at = datetime.utcnow().isoformat()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionRecord":
+        return cls(**data)
 
 class ExecutionStore:
     """JSONL 执行历史存储"""
 
-    def __init__(self, data_dir: Path = Path(".tflow/data/executions")):
-        self.data_dir = data_dir
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self._current_file: Path | None = None
+    def __init__(self, base_dir: Optional[str] = None):
+        if base_dir is None:
+            project_root = Path(__file__).parent.parent.parent.parent
+            base_dir = project_root / ".workflow" / "executions"
+        else:
+            base_dir = Path(base_dir)
+        self.base_dir = base_dir
+        self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
 
-    def _get_execution_file(self, session_id: str) -> Path:
-        """获取会话的执行文件"""
-        return self.data_dir / f"{session_id}.jsonl"
+    def _get_file_path(self, workflow_id: str) -> Path:
+        return self.base_dir / f"{workflow_id}.jsonl"
 
-    async def append(
-        self,
-        session_id: str,
-        phase: str,
-        status: str,
-        input: dict[str, Any],
-        output: dict[str, Any] | None = None,
-        error: str | None = None,
-        duration_ms: int | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> ExecutionRecord:
+    async def append(self, record: ExecutionRecord) -> bool:
         """追加执行记录"""
-        record = ExecutionRecord(
-            session_id=session_id,
-            timestamp=datetime.now().isoformat(),
-            phase=phase,
-            status=status,
-            input=input,
-            output=output,
-            error=error,
-            duration_ms=duration_ms,
-            metadata=metadata or {},
-        )
+        try:
+            path = self._get_file_path(record.workflow_id)
+            async with self._lock:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+            return True
+        except Exception as e:
+            print(f"Failed to append record: {e}")
+            return False
 
-        file_path = self._get_execution_file(session_id)
-        async with self._lock:
-            with open(file_path, "a") as f:
-                f.write(json.dumps(record.__dict__, default=str) + "\n")
-
-        return record
-
-    async def get_session_history(
-        self,
-        session_id: str,
-        phase: str | None = None,
-    ) -> list[ExecutionRecord]:
-        """获取会话执行历史"""
-        file_path = self._get_execution_file(session_id)
-        if not file_path.exists():
-            return []
-
+    async def get(self, workflow_id: str) -> List[ExecutionRecord]:
+        """获取工作流的所有执行记录"""
         records = []
-        with open(file_path, "r") as f:
-            for line in f:
-                if line.strip():
-                    record_dict = json.loads(line)
-                    if phase is None or record_dict.get("phase") == phase:
-                        records.append(ExecutionRecord(**record_dict))
+        path = self._get_file_path(workflow_id)
+        if not path.exists():
+            return records
+        try:
+            async with self._lock:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            data = json.loads(line)
+                            records.append(ExecutionRecord.from_dict(data))
+        except Exception as e:
+            print(f"Failed to read records: {e}")
         return records
+
+    async def get_latest(self, workflow_id: str) -> Optional[ExecutionRecord]:
+        """获取最新的执行记录"""
+        records = await self.get(workflow_id)
+        return records[-1] if records else None
+
+    async def get_by_task(self, workflow_id: str, task_id: str) -> List[ExecutionRecord]:
+        """获取特定任务的执行记录"""
+        records = await self.get(workflow_id)
+        return [r for r in records if r.task_id == task_id]
+
+    async def list_workflows(self) -> List[str]:
+        """列出所有工作流 ID"""
+        try:
+            return [p.stem for p in self.base_dir.glob("*.jsonl")]
+        except Exception as e:
+            print(f"Failed to list workflows: {e}")
+            return []
 
     async def iter_sessions(self) -> AsyncIterator[str]:
         """迭代所有会话 ID"""
-        for file_path in self.data_dir.glob("*.jsonl"):
-            yield file_path.stem
-
-    async def recover_session(self, session_id: str) -> dict[str, Any] | None:
-        """恢复会话状态"""
-        records = await self.get_session_history(session_id)
-        if not records:
-            return None
-
-        last_record = records[-1]
-        return {
-            "session_id": session_id,
-            "last_phase": last_record.phase,
-            "last_status": last_record.status,
-            "total_records": len(records),
-            "records": records,
-        }
+        for p in self.base_dir.glob("*.jsonl"):
+            yield p.stem
 ```
 
 ### 4.8 SQLiteStore (`storage/sqlite_store.py`)
@@ -2447,215 +2047,215 @@ class ExecutionStore:
 """结构化数据存储 - SQLite 实现"""
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Any
-import asyncio
-import json
+from typing import Optional, List, Dict, Any
 import sqlite3
+import json
+import asyncio
 
 @dataclass
 class SQLiteStoreConfig:
     """SQLite 配置"""
-    db_path: Path = Path(".tflow/data/tflow.db")
+    db_path: Optional[str] = None
+    timeout: int = 5
     wal_mode: bool = True  # Write-Ahead Logging
 
 class SQLiteStore:
     """SQLite 存储 - 用于结构化数据"""
 
-    def __init__(self, config: SQLiteStoreConfig | None = None):
-        self.config = config or SQLiteStoreConfig()
-        self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection | None = None
+    def __init__(self, config: Optional[SQLiteStoreConfig] = None):
+        if config is None:
+            config = SQLiteStoreConfig()
+        self.config = config
+        if config.db_path is None:
+            project_root = Path(__file__).parent.parent.parent.parent
+            db_path = project_root / ".workflow" / "tflow.db"
+        else:
+            db_path = Path(config.db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = db_path
         self._lock = asyncio.Lock()
         self._init_db()
 
-    def _init_db(self) -> None:
-        """初始化数据库"""
-        self._conn = sqlite3.connect(self.config.db_path)
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=self.config.timeout)
+        conn.row_factory = sqlite3.Row
         if self.config.wal_mode:
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._create_tables()
+            conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
-    def _create_tables(self) -> None:
-        """创建表"""
-        self._conn.executescript("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                context TEXT,
-                result TEXT
-            );
+    def _init_db(self) -> None:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    context TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    metadata TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    task_id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT NOT NULL,
+                    input_data TEXT,
+                    output_data TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    metadata TEXT,
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
 
-            CREATE TABLE IF NOT EXISTS tasks (
-                task_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                title TEXT,
-                status TEXT NOT NULL,
-                wave INTEGER DEFAULT 1,
-                scope TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
-            CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-        """)
-
-    async def save_session(self, session_id: str, status: str, context: dict, result: dict | None = None) -> None:
+    async def save_session(self, session_data: Dict[str, Any]) -> bool:
         """保存会话"""
-        now = datetime.now().isoformat()
         async with self._lock:
-            self._conn.execute("""
-                INSERT OR REPLACE INTO sessions (session_id, status, created_at, updated_at, context, result)
-                VALUES (?, ?, COALESCE((SELECT created_at FROM sessions WHERE session_id = ?), ?), ?, ?, ?)
-            """, (session_id, status, session_id, now, now, json.dumps(context), json.dumps(result) if result else None))
-            self._conn.commit()
+            return await asyncio.to_thread(self._save_session_sync, session_data)
 
-    async def get_session(self, session_id: str) -> dict[str, Any] | None:
+    def _save_session_sync(self, session_data: Dict[str, Any]) -> bool:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            context_json = json.dumps(session_data.get("context", {}))
+            metadata_json = json.dumps(session_data.get("metadata", {}))
+            cursor.execute("""
+                INSERT OR REPLACE INTO sessions
+                (session_id, name, context, created_at, updated_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                session_data["session_id"],
+                session_data["name"],
+                context_json,
+                session_data["created_at"],
+                session_data["updated_at"],
+                metadata_json,
+            ))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Failed to save session: {e}")
+            return False
+        finally:
+            conn.close()
+
+    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话"""
-        row = self._conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
-        ).fetchone()
-        if not row:
+        async with self._lock:
+            return await asyncio.to_thread(self._get_session_sync, session_id)
+
+    def _get_session_sync(self, session_id: str) -> Optional[Dict[str, Any]]:
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_session(row)
             return None
+        finally:
+            conn.close()
+
+    def _row_to_session(self, row: sqlite3.Row) -> Dict[str, Any]:
         return {
-            "session_id": row[0],
-            "status": row[1],
-            "created_at": row[2],
-            "updated_at": row[3],
-            "context": json.loads(row[4]) if row[4] else {},
-            "result": json.loads(row[5]) if row[5] else None,
+            "session_id": row["session_id"],
+            "name": row["name"],
+            "context": json.loads(row["context"] or "{}"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "metadata": json.loads(row["metadata"] or "{}"),
         }
 
-    async def save_task(self, task_id: str, session_id: str, title: str, status: str, wave: int = 1, scope: str = "") -> None:
-        """保存任务"""
-        now = datetime.now().isoformat()
+    async def list_sessions(self, status: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+        """列出所有会话"""
         async with self._lock:
-            self._conn.execute("""
-                INSERT OR REPLACE INTO tasks (task_id, session_id, title, status, wave, scope, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tasks WHERE task_id = ?), ?), ?)
-            """, (task_id, session_id, title, status, wave, scope, task_id, now, now))
-            self._conn.commit()
+            return await asyncio.to_thread(self._list_sessions_sync, status, limit)
 
-    async def get_tasks(self, session_id: str, status: str | None = None) -> list[dict[str, Any]]:
+    async def save_task(self, task_data: Dict[str, Any]) -> bool:
+        """保存任务"""
+        async with self._lock:
+            return await asyncio.to_thread(self._save_task_sync, task_data)
+
+    async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """获取任务"""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_task_sync, task_id)
+
+    async def get_tasks(self, session_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取任务列表"""
-        if status:
-            rows = self._conn.execute(
-                "SELECT * FROM tasks WHERE session_id = ? AND status = ? ORDER BY wave, created_at",
-                (session_id, status)
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM tasks WHERE session_id = ? ORDER BY wave, created_at",
-                (session_id,)
-            ).fetchall()
-        return [
-            {
-                "task_id": row[0],
-                "session_id": row[1],
-                "title": row[2],
-                "status": row[3],
-                "wave": row[4],
-                "scope": row[5],
-                "created_at": row[6],
-                "updated_at": row[7],
-            }
-            for row in rows
-        ]
+        async with self._lock:
+            return await asyncio.to_thread(self._get_tasks_sync, session_id, status)
 
     async def close(self) -> None:
         """关闭连接"""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-
-    async def list_sessions(self, status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        """列出所有会话"""
-        if status:
-            rows = self._conn.execute(
-                "SELECT * FROM sessions WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
-                (status, limit)
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
-        return [
-            {
-                "session_id": row[0],
-                "status": row[1],
-                "created_at": row[2],
-                "updated_at": row[3],
-            }
-            for row in rows
-        ]
+        pass
 ```
 
 ### 4.9 RealtimeBridge (`realtime/bridge.py`)
 
 ```python
-"""实时事件桥接 - WebSocket/SSE 实现"""
+"""实时事件桥接 - SSE 实现"""
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, AsyncIterator
+from typing import Optional, Dict, Any, List, Callable, AsyncIterator
+from datetime import datetime
 import asyncio
-import json
 
 class EventDelivery(Enum):
     """事件投递方式"""
-    WEBSOCKET = "websocket"
-    SSE = "sse"
+    SYNC = "sync"
+    ASYNC = "async"
+    FIRE_AND_FORGET = "fire_and_forget"
 
 @dataclass
 class BridgeEvent:
     """桥接事件"""
     type: str
     session_id: str
-    timestamp: str
-    data: dict[str, Any]
+    data: Dict[str, Any]
+    timestamp: str = ""
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.utcnow().isoformat()
 
 @dataclass
 class RealtimeBridgeConfig:
     """实时桥接配置"""
-    delivery: EventDelivery = EventDelivery.SSE
-    heartbeat_interval: int = 30  # 秒
+    name: str = "default"
+    buffer_size: int = 1000
+    heartbeat_interval: int = 30
     max_queue_size: int = 100
+    delivery: EventDelivery = EventDelivery.ASYNC
 
 class RealtimeBridge:
     """实时事件桥接器"""
 
-    def __init__(self, config: RealtimeBridgeConfig | None = None):
-        self.config = config or RealtimeBridgeConfig()
-        self._subscribers: dict[str, list[asyncio.Queue]] = {}
+    def __init__(self, config: Optional[RealtimeBridgeConfig] = None):
+        if config is None:
+            config = RealtimeBridgeConfig()
+        self.config = config
+        self._subscribers: Dict[str, List[asyncio.Queue]] = {}
+        self._event_buffer: List[BridgeEvent] = []
+        self._running = False
         self._lock = asyncio.Lock()
-        self._running = False
-
-    async def start(self) -> None:
-        """启动桥接服务"""
-        self._running = True
-        if self.config.delivery == EventDelivery.SSE:
-            asyncio.create_task(self._heartbeat_loop())
-
-    async def stop(self) -> None:
-        """停止桥接服务"""
-        self._running = False
-        async with self._lock:
-            for queue in self._subscribers.values():
-                for q in queue:
-                    await q.put(None)  # 发送结束信号
-            self._subscribers.clear()
 
     async def subscribe(self, session_id: str) -> AsyncIterator[BridgeEvent]:
         """订阅会话事件"""
-        queue: asyncio.Queue[BridgeEvent | None] = asyncio.Queue(maxsize=self.config.max_queue_size)
+        queue: asyncio.Queue[BridgeEvent] = asyncio.Queue(maxsize=self.config.max_queue_size)
         async with self._lock:
             if session_id not in self._subscribers:
                 self._subscribers[session_id] = []
@@ -2663,24 +2263,31 @@ class RealtimeBridge:
 
         try:
             while self._running:
-                event = await queue.get()
-                if event is None:
-                    break
-                yield event
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield event
+                except asyncio.TimeoutError:
+                    continue
         finally:
             async with self._lock:
                 if session_id in self._subscribers and queue in self._subscribers[session_id]:
                     self._subscribers[session_id].remove(queue)
 
-    async def publish(self, session_id: str, event_type: str, data: dict[str, Any]) -> None:
+    async def publish(self, session_id: str, event_type: str, data: Dict[str, Any]) -> None:
         """发布事件"""
         event = BridgeEvent(
             type=event_type,
             session_id=session_id,
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.utcnow().isoformat(),
             data=data,
         )
 
+        # 添加到缓冲区
+        self._event_buffer.append(event)
+        if len(self._event_buffer) > self.config.buffer_size:
+            self._event_buffer = self._event_buffer[-self.config.buffer_size:]
+
+        # 投递到订阅者
         async with self._lock:
             queues = self._subscribers.get(session_id, [])
 
@@ -2688,19 +2295,23 @@ class RealtimeBridge:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                pass  # 忽略队列满的情况
+                pass
 
-    async def broadcast(self, event_type: str, data: dict[str, Any]) -> None:
+    async def broadcast(self, event_type: str, data: Dict[str, Any]) -> None:
         """广播事件到所有订阅者"""
-        async with self._lock:
-            all_queues = [q for queues in self._subscribers.values() for q in queues]
-
         event = BridgeEvent(
             type=event_type,
             session_id="*",
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.utcnow().isoformat(),
             data=data,
         )
+
+        self._event_buffer.append(event)
+        if len(self._event_buffer) > self.config.buffer_size:
+            self._event_buffer = self._event_buffer[-self.config.buffer_size:]
+
+        async with self._lock:
+            all_queues = [q for queues in self._subscribers.values() for q in queues]
 
         for queue in all_queues:
             try:
@@ -2708,13 +2319,6 @@ class RealtimeBridge:
             except asyncio.QueueFull:
                 pass
 
-    async def _heartbeat_loop(self) -> None:
-        """心跳循环"""
-        while self._running:
-            await asyncio.sleep(self.config.heartbeat_interval)
-            await self.broadcast("heartbeat", {"timestamp": datetime.now().isoformat()})
-
-    # 便捷方法 - 与 JobManager 集成
     async def attach_to_job_manager(self, job_manager: Any) -> None:
         """附加到 JobManager"""
         async def on_job_event(event: Any) -> None:
@@ -2727,6 +2331,40 @@ class RealtimeBridge:
                 }
             )
         await job_manager.subscribe(on_job_event)
+
+    def get_events(self, event_type: Optional[str] = None, limit: int = 100) -> List[BridgeEvent]:
+        """获取缓冲的事件"""
+        events = self._event_buffer
+        if event_type:
+            events = [e for e in events if e.type == event_type]
+        return events[-limit:]
+
+    def clear_events(self) -> None:
+        """清空事件缓冲区"""
+        self._event_buffer.clear()
+
+    async def start_heartbeat(self) -> None:
+        """启动心跳"""
+        self._running = True
+        while self._running:
+            try:
+                await asyncio.sleep(self.config.heartbeat_interval)
+                if self._running:
+                    await self.broadcast("heartbeat", {"timestamp": datetime.utcnow().isoformat()})
+            except asyncio.CancelledError:
+                break
+
+    def stop_heartbeat(self) -> None:
+        """停止心跳"""
+        self._running = False
+
+    def get_subscriber_count(self) -> int:
+        """获取订阅者数量"""
+        return sum(len(qs) for qs in self._subscribers.values())
+
+    def format_sse(self, event: BridgeEvent) -> str:
+        """格式化为 SSE 格式"""
+        return f"id: {event.session_id}\nevent: {event.type}\ndata: {event.data}\n\n"
 ```
 
 ### 4.10 DelegateBroker (`delegate/broker.py`)

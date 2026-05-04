@@ -12,7 +12,7 @@ import os
 class AgentType(Enum):
     """Agent type enum."""
 
-    CLAUDE = "claude"
+    CLAUDE_CODE = "claude-code"
     GEMINI = "gemini"
     QWEN = "qwen"
     CODEX = "codex"
@@ -50,7 +50,7 @@ class AgentConfig:
     def _default_command(self) -> Optional[str]:
         """Get default command for agent type."""
         commands = {
-            AgentType.CLAUDE: "claude",
+            AgentType.CLAUDE_CODE: "claude",
             AgentType.GEMINI: "gemini",
             AgentType.QWEN: "qwen",
             AgentType.CODEX: "codex",
@@ -396,7 +396,7 @@ class AgentRegistry:
             Created agent instance
         """
         agent_classes = {
-            AgentType.CLAUDE: ClaudeAgent,
+            AgentType.CLAUDE_CODE: ClaudeAgent,
             AgentType.GEMINI: GeminiAgent,
             AgentType.QWEN: QwenAgent,
             AgentType.CODEX: CodexAgent,
@@ -410,3 +410,7 @@ class AgentRegistry:
         agent = agent_class(config)
         self.register(agent)
         return agent
+
+
+# Global singleton instance
+agent_registry = AgentRegistry()
