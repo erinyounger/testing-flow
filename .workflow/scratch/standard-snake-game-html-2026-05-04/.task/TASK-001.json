@@ -12,11 +12,12 @@
   "convergence": {
     "criteria": [
       "游戏页面加载后显示20x20网格的Canvas",
+      "游戏循环每100ms更新一次（tick speed = 100ms）",
       "按方向键或WASD可控制蛇的移动方向",
       "蛇吃到食物后长度增加，分数增加",
       "蛇撞墙或撞到自己时游戏结束"
     ],
-    "verification": "浏览器打开index.html，观察游戏运行状态"
+    "verification": "浏览器打开index.html，观察游戏运行状态；使用开发者工具检查代码中tick speed设置"
   },
   "files": [
     {
@@ -44,7 +45,7 @@
     "files": []
   },
   "meta": {
-    "status": "completed",
+    "status": "pending",
     "estimated_time": "30m",
     "risk": "low",
     "wave": 1,
