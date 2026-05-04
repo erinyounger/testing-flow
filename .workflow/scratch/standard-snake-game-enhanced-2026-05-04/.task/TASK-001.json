@@ -1,0 +1,49 @@
+{
+  "id": "TASK-001",
+  "title": "实现穿墙功能与速度调节",
+  "description": "在现有贪吃蛇游戏中实现两个功能：1) 穿墙 - 蛇从墙壁一侧穿出后从另一侧进入；2) 速度调节 - 玩家可选择游戏速度（慢/中/快三档）",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "index.html",
+  "focus_paths": ["index.html"],
+  "depends_on": [],
+  "convergence": {
+    "criteria": [
+      "蛇碰到上边界时从下边界出现，碰到下边界时从上边界出现，左右同理",
+      "玩家可通过下拉菜单选择慢速(150ms)/中速(100ms)/快速(60ms)三档速度",
+      "速度设置在游戏开始前可调整"
+    ],
+    "verification": "手动测试：1) 蛇向墙壁移动验证穿墙效果；2) 不同速度设置下游戏体验差异"
+  },
+  "files": [
+    {
+      "path": "index.html",
+      "action": "modify",
+      "target": "SnakeGame class"
+    }
+  ],
+  "implementation": [
+    "在 moveSnake() 方法中，蛇头坐标超出边界时使用取模运算绕回",
+    "添加速度选择下拉框（慢/中/快）到 HTML",
+    "将固定 GAME_SPEED 改为动态速度变量，支持三种速度档位",
+    "修改 update() 方法使用动态速度值"
+  ],
+  "test": {
+    "commands": [],
+    "unit": [],
+    "success_metrics": ["穿墙逻辑正确工作", "速度档位切换生效"]
+  },
+  "reference": {
+    "pattern": "参考现有代码风格",
+    "files": ["index.html"]
+  },
+  "meta": {
+    "status": "pending",
+    "estimated_time": "45m",
+    "risk": "low",
+    "wave": 1,
+    "executor": "agent"
+  }
+}

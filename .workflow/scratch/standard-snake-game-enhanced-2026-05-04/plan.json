@@ -1,0 +1,37 @@
+{
+  "summary": "为贪吃蛇游戏增加三个增强功能：穿墙通行、速度调节、用户名排行榜",
+  "approach": "修改现有 index.html 文件，在保持代码结构完整的前提下增加新功能。穿墙和速度调节通过修改游戏核心逻辑实现；排行榜使用 localStorage 存储分数数据并新增排行榜UI。",
+  "task_ids": ["TASK-001", "TASK-002"],
+  "task_count": 2,
+  "complexity": "medium",
+  "estimated_time": "1.5h",
+  "recommended_execution": "Agent",
+  "waves": [
+    {"wave": 1, "tasks": ["TASK-001", "TASK-002"]}
+  ],
+  "design_decisions": [
+    {
+      "decision": "穿墙实现使用坐标取模绕回逻辑",
+      "rationale": "蛇头超出边界时通过取模运算从对侧出现，如 head.x < 0 时变为 GRID_SIZE - 1"
+    },
+    {
+      "decision": "速度调节使用慢/中/快三档",
+      "rationale": "简单直观，避免滑块 UI 复杂度，符合游戏场景"
+    },
+    {
+      "decision": "排行榜使用 localStorage 存储",
+      "rationale": "单文件游戏无需后端，本地持久化即可满足需求"
+    }
+  ],
+  "shared_context": {
+    "patterns": ["使用 requestAnimationFrame 驱动游戏循环", "使用 Canvas 2D API 绘制"],
+    "conventions": ["保持现有代码风格和结构", "HTML/CSS/JS 集中在单文件"],
+    "dependencies": []
+  },
+  "_metadata": {
+    "timestamp": "2026-05-04T00:00:00.000Z",
+    "source": "agent-planner",
+    "planning_mode": "quick",
+    "plan_type": "feature"
+  }
+}

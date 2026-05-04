@@ -4,7 +4,7 @@
   "status": "idle",
   "current_task_id": null,
   "artifacts": [],
-  "last_updated": "2026-05-04T21:15:00+08:00",
+  "last_updated": "2026-05-04T21:30:00+08:00",
   "accumulated_context": {
     "key_decisions": [],
     "blockers": [],
@@ -15,6 +15,13 @@
         "description": "使用html单页面方式开发一个贪吃蛇游戏，使用best practice 技术栈",
         "completed_at": "2026-05-04T21:15:00+08:00",
         "directory": ".workflow/scratch/standard-snake-game-html-2026-05-04",
+        "verified": "passed"
+      },
+      {
+        "id": "standard-snake-game-enhanced-2026-05-04",
+        "description": "在贪吃蛇游戏中增加：1、可以穿墙；2、可以调节速度；3、可以输入用户名排名",
+        "completed_at": "2026-05-04T21:30:00+08:00",
+        "directory": ".workflow/scratch/standard-snake-game-enhanced-2026-05-04",
         "verified": "passed"
       }
     ]
