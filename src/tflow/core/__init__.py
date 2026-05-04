@@ -9,6 +9,8 @@ from tflow.core.executor import (
     ExecutionResult,
     AgentProcess,
 )
+from tflow.core.session import Session, SessionManager, SessionStatus
+from tflow.core.events import EventType, CoreEvent, EventEmitter, JobEvent
 
 __all__ = [
     "AgentExecutor",
@@ -18,4 +20,11 @@ __all__ = [
     "RunOptions",
     "ExecutionResult",
     "AgentProcess",
+    "Session",
+    "SessionManager",
+    "SessionStatus",
+    "EventType",
+    "CoreEvent",
+    "EventEmitter",
+    "JobEvent",
 ]
