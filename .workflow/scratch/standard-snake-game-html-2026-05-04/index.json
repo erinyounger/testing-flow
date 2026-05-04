@@ -1,21 +1,21 @@
 {
   "id": "standard-snake-game-html-2026-05-04",
   "type": "standard",
-  "title": "使用html单页面方式开发一个贪吃蛇游戏，使用best practice 技术栈",
+  "title": "frontend-design:frontend-design 开发一个单页面贪吃蛇游戏，使用html最佳效果，颜色配比科技风支持：1、可以穿墙；2、可以调节速度；3、可以输入用户名排名；4、支持设置多颗球",
   "status": "completed",
-  "created_at": "2026-05-04T00:00:00Z",
-  "updated_at": "2026-05-04T21:15:00+08:00",
+  "created_at": "2026-05-04T21:56:00+08:00",
+  "updated_at": "2026-05-04T22:02:00+08:00",
   "flags": {
-    "discuss": true,
+    "discuss": false,
     "full": true
   },
   "plan": {
-    "task_ids": ["TASK-001", "TASK-002"],
-    "task_count": 2
+    "task_ids": ["TASK-001"],
+    "task_count": 1
   },
   "execution": {
     "method": "agent",
-    "tasks_completed": 2,
-    "tasks_total": 2
+    "tasks_completed": 1,
+    "tasks_total": 1
   }
 }

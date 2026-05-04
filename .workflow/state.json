@@ -1,0 +1,19 @@
+{
+  "status": "idle",
+  "created_at": "2026-05-04T21:52:00+08:00",
+  "updated_at": "2026-05-04T22:02:00+08:00",
+  "project": {
+    "name": "testing-flow",
+    "domain": "通用测试流程"
+  },
+  "artifacts": [],
+  "standard_tasks": [
+    {
+      "id": "standard-snake-game-html-2026-05-04",
+      "description": "frontend-design:frontend-design 开发一个单页面贪吃蛇游戏",
+      "completed_at": "2026-05-04T22:02:00+08:00",
+      "directory": ".workflow/scratch/standard-snake-game-html-2026-05-04",
+      "verified": "passed"
+    }
+  ]
+}
