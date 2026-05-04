@@ -1,0 +1,26 @@
+# TASK-002: 实现 workflow 引擎模块
+
+## Changes
+- `src/tflow/workflow/__init__.py`: 创建模块导出
+- `src/tflow/workflow/state.py`: 创建 WorkflowStatus 枚举 (IDLE, PARSING, VALIDATING, PLANNING, EXECUTING, VERIFYING, COMPLETING, COMPLETED, FAILED, PAUSED) 和 WorkflowState 数据类
+- `src/tflow/workflow/engine.py`: 创建 WorkflowEngine 状态机类，实现状态转换逻辑和事件发布
+- `src/tflow/workflow/persistence.py`: 创建会话持久化模块
+
+## Verification
+- [x] `src/tflow/workflow/engine.py` 包含 `class WorkflowEngine` 定义
+- [x] `src/tflow/workflow/state.py` 包含 `class WorkflowState` 定义和 WorkflowStatus 枚举
+- [x] `src/tflow/workflow/persistence.py` 包含会话持久化方法
+- [x] `python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print("Workflow imports OK")'` 执行成功
+- [x] WorkflowEngine 状态机支持状态转换：IDLE → PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED
+
+## Tests
+- [x] `PYTHONPATH=/home/eeric/code/testing-flow/src python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print("Workflow imports OK")'`: PASS
+
+## Deviations
+- None
+
+## Notes
+- WorkflowEngine 实现线性状态机
+- 支持暂停/恢复功能
+- 事件驱动便于扩展
+- Task completed successfully

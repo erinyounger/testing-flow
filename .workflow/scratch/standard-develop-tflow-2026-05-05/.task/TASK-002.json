@@ -1,0 +1,71 @@
+{
+  "id": "TASK-002",
+  "title": "实现 workflow 引擎模块",
+  "description": "创建 workflow/engine.py (WorkflowEngine 状态机), workflow/state.py (WorkflowState), workflow/persistence.py (会话持久化)。WorkflowEngine 实现线性状态机：PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED。",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/tflow/workflow",
+  "focus_paths": [
+    "src/tflow/workflow/__init__.py",
+    "src/tflow/workflow/engine.py",
+    "src/tflow/workflow/state.py",
+    "src/tflow/workflow/persistence.py"
+  ],
+  "depends_on": [],
+  "convergence": {
+    "criteria": [
+      "src/tflow/workflow/engine.py 包含 'class WorkflowEngine' 定义",
+      "src/tflow/workflow/state.py 包含 'class WorkflowState' 定义和 WorkflowStatus 枚举",
+      "src/tflow/workflow/persistence.py 包含会话持久化方法",
+      "python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print(\"Workflow imports OK\")' 执行成功",
+      "WorkflowEngine 状态机支持状态转换：IDLE → PARSING → VALIDATING → PLANNING → EXECUTING → VERIFYING → COMPLETING → COMPLETED"
+    ],
+    "verification": "python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print(\"Workflow imports OK\")'"
+  },
+  "files": [
+    {
+      "path": "src/tflow/workflow/__init__.py",
+      "action": "create",
+      "target": "workflow module exports"
+    },
+    {
+      "path": "src/tflow/workflow/state.py",
+      "action": "create",
+      "target": "WorkflowState dataclass 和 WorkflowStatus 枚举"
+    },
+    {
+      "path": "src/tflow/workflow/engine.py",
+      "action": "create",
+      "target": "WorkflowEngine 状态机实现"
+    },
+    {
+      "path": "src/tflow/workflow/persistence.py",
+      "action": "create",
+      "target": "会话持久化实现"
+    }
+  ],
+  "implementation": [
+    "创建 workflow/__init__.py - 导出 WorkflowEngine, WorkflowState, WorkflowStatus",
+    "创建 workflow/state.py - WorkflowStatus 枚举 (IDLE, PARSING, VALIDATING, PLANNING, EXECUTING, VERIFYING, COMPLETING, COMPLETED, FAILED, PAUSED) 和 WorkflowState 数据类",
+    "创建 workflow/engine.py - WorkflowEngine 状态机类，实现状态转换逻辑和事件发布",
+    "创建 workflow/persistence.py - Workflow 会话持久化，使用 JSONL 存储"
+  ],
+  "test": {
+    "commands": ["python -c 'from tflow.workflow import WorkflowEngine, WorkflowState, WorkflowStatus; print(\"Workflow OK\")'"],
+    "unit": ["tests/test_workflow/test_engine.py", "tests/test_workflow/test_state.py"],
+    "success_metrics": ["WorkflowEngine 可以实例化", "状态转换按预期工作", "WorkflowState 可以序列化和反序列化"]
+  },
+  "reference": {
+    "pattern": "参考 design doc 3.1 节 workflow 模块定义，4.0.1 节状态映射",
+    "files": ["docs/tflow-python-backend-design.md"]
+  },
+  "meta": {
+    "status": "completed",
+    "estimated_time": "60m",
+    "risk": "medium",
+    "wave": 2,
+    "executor": "agent"
+  }
+}
