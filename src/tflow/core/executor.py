@@ -198,7 +198,7 @@ class AgentExecutor:
         cmd: list[str] = []
 
         if agent_type == AgentType.CLAUDE_CODE:
-            cmd = ["claude", "-p", prompt, "--no-input"]
+            cmd = ["claude", "-p", prompt]
             if options.model:
                 cmd.extend(["--model", options.model])
             if options.settings_file:
