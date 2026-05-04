@@ -15,13 +15,14 @@
 | `/maestro-execute [phase]` | 波次执行pending计划 | `execute.md` |
 | `maestro delegate "prompt"` | 调用外部 CLI agent（gemini/qwen/codex） | 直连 |
 
-### 三种 Agent Spawn 路径
+### 两种 Agent Spawn 路径
 
 | 路径 | 机制 | 典型用途 |
 |------|------|---------|
 | **A** | Claude Code Skill Tool → 内置 Agent | workflow-planner, workflow-executor, workflow-verifier |
 | **B** | Bash → `maestro delegate` → CliAgentRunner | 外部 CLI agent 探索性分析 |
-| **C** | `maestro coordinate` → `maestro cli` → CliAgentRunner | 旧版 chain 机制（已废弃） |
+
+> **注意**: 旧版路径 C（`maestro coordinate` → `maestro cli`）已废弃，不再维护。
 
 ### 状态层次
 
@@ -150,9 +151,9 @@ Skip entirely if NOT $FLAG_MODE.
 
 ---
 
-## 四、三种 Agent Spawn 路径
+## 四、两种 Agent Spawn 路径
 
-这是系统的核心机制。Maestro 有**三条完全不同的 agent 调用路径**。
+这是系统的核心机制。Maestro 有**两条完全不同的 agent 调用路径**。
 
 ### 路径 A：Skill Tool → Claude Code Agent
 
@@ -225,27 +226,6 @@ buildDelegatePrompt(task_def, phase_context, specs_content, prior_summaries)
 // CONSTRAINTS: Scope limited to task files | Follow project specs
 ```
 
-### 路径 C：`maestro coordinate` → `maestro cli`（旧版）
-
-适用场景：旧版 chain graph 系统（已废弃）
-
-```
-GraphWalker 执行 command node
-    │
-    ▼
-createSpawnFn()  // src/commands/coordinate.ts:64
-    │
-    └─→ execFileAsync(process.execPath, [
-          entryScript, 'cli', '-p', config.prompt,
-          '--tool', tool, '--mode', mode, '--cd', config.workDir
-        ])
-            │
-            ▼
-    src/commands/cli.ts → CliAgentRunner.run()
-```
-
-路径 C 是**历史遗留机制**。`coordinate.ts` 的 `createSpawnFn()` 在新版 skill 系统中不再使用。
-
 ### Spawn 路径决策逻辑
 
 ```
@@ -257,9 +237,6 @@ createSpawnFn()  // src/commands/coordinate.ts:64
 
 3. 任务是否需要 Gemini/Qwen/Codex 的特定探索能力？
    → YES → 路径 B（maestro delegate --to {gemini|qwen|codex}）
-
-4. 是否是旧版 chain/coordinate 机制？
-   → YES → 路径 C（历史遗留，新场景不应使用）
 ```
 
 ### 路径 A 变体：Team Agent Types
@@ -639,6 +616,240 @@ workflow-verifier（full 模式）
 
 ---
 
+## 十一、后端核心模块
+
+Maestro-Flow 后端是**多智能体工作流编排引擎**，核心是 `CliAgentRunner` 统一调度各种 CLI agent。
+
+### 核心模块架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Maestro-Flow 后端                              │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   Command   │  │  Workflow   │  │       Agent             │ │
+│  │   Layer     │→ │   Engine    │→ │  (Claude/CLI/External)  │ │
+│  └─────────────┘  └─────────────┘  └───────────┬─────────────┘ │
+│                                                  │               │
+│  ┌──────────────────────────────────────────────┼─────────────┐ │
+│  │                  Core Runtime                             │ │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌───────────┐ │ │
+│  │  │ CliAgentRunner  │  │ DelegateBroker   │  │  History   │ │ │
+│  │  │  - 适配器选择    │  │  - Job 队列化   │  │  Store    │ │ │
+│  │  │  - 进程启动     │  │  - 状态追踪     │  │  - JSONL  │ │ │
+│  │  │  - 事件订阅     │  │  - 消息队列     │  │  - 元数据  │ │ │
+│  │  └────────┬────────┘  └────────┬────────┘  └───────────┘ │ │
+│  │           │                    │                         │ │
+│  │  ┌────────┴────────┐  ┌────────┴────────┐               │ │
+│  │  │ DashboardBridge │  │ TerminalAdapter  │               │ │
+│  │  │  (WebSocket)    │  │  (tmux/wezterm) │               │ │
+│  │  └─────────────────┘  └─────────────────┘               │ │
+│  └──────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │              Database Schema (多租户)                     │   │
+│  │  organizations | users | permissions | refresh_tokens     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 1. CliAgentRunner（统一执行器）
+
+**文件**: `src/agents/cli-agent-runner.ts`
+
+核心职责：
+- **Prompt 组装**: `assemblePrompt()` = protocol + specs + user prompt + template
+- **适配器工厂**: `createAdapter()` 根据 backend 选择 DashboardBridge 或 TerminalAdapter
+- **进程管理**: `adapter.spawn()` 启动 agent 进程
+- **事件订阅**: `adapter.onEntry()` 订阅所有 entry 事件
+- **会话恢复**: `--resume` 支持从历史上下文继续
+
+```typescript
+// 核心流程
+const runner = new CliAgentRunner();
+await runner.run({
+  prompt: assembledPrompt,
+  tool: 'gemini',      // gemini | qwen | codex | claude | opencode
+  mode: 'write',       // analysis | write
+  workDir: process.cwd(),
+  backend: 'direct',   // direct | terminal
+});
+```
+
+### 2. Delegate Broker（事件代理）
+
+**文件**: `src/async/delegate-broker.ts`
+
+核心职责：
+- **Job 状态管理**: queued → running → input_required → completed/failed/cancelled
+- **消息队列**: `inject`（注入运行中）和 `after_complete`（完成后发送）
+- **持久化**: FileDelegateBroker (JSON) 或 SqliteDelegateBroker (SQLite)
+
+```typescript
+// Job 状态流转
+queued → running → completed
+               → failed
+               → cancelled
+            ↗
+       input_required
+
+// 两种 Broker 实现
+- FileDelegateBroker:   delegate-broker.json（文件锁，跨进程）
+- SqliteDelegateBroker: delegate-broker.sqlite（WAL 模式，高并发）
+```
+
+### 3. Terminal Adapter（终端适配器）
+
+**文件**: `src/agents/terminal-adapter.ts`
+
+核心职责：
+- **tmux/wezterm 后端**: 在终端多路复用器中运行 CLI agent
+- **轮询机制**: 每 2s 轮询 pane 输出
+- **超时检测**: 120s 无变化判定为 stale timeout
+
+```typescript
+// 轮询机制
+while (panes.get(processId)?.polling) {
+  await sleep(2000);           // 每 2s 轮询
+  alive = backend.isAlive(paneId);
+  content = backend.getText(paneId);
+  
+  if (content !== lastContent) {
+    emit({ type: 'assistant_message', content: newContent });
+    staleCount = 0;
+  } else {
+    staleCount++;
+    if (staleCount >= 60) {    // 120s 无变化
+      emit({ type: 'status_change', status: 'stopped', reason: 'stale timeout' });
+      break;
+    }
+  }
+}
+```
+
+### 4. CLI History Store（历史存储）
+
+**文件**: `src/agents/cli-history-store.ts`
+
+核心职责：
+- **JSONL 持久化**: `{execId}.jsonl` 存储每次执行的所有 entry
+- **元数据存储**: `{execId}.meta.json` 存储执行元数据
+- **Session Resume**: `buildResumePrompt()` 从历史构建恢复 prompt
+
+```typescript
+// 存储结构
+~/.maestro/cli-history/
+├── {execId}.jsonl    // 所有 entry（assistant_message, tool_use, error...）
+└── {execId}.meta.json // 执行元数据（tool, mode, startedAt, exitCode...）
+```
+
+### 5. Dashboard Bridge（仪表盘桥接）
+
+**文件**: `src/agents/dashboard-bridge.ts`
+
+核心职责：
+- **WebSocket 转发**: 实时转发 spawn/entry/stopped 事件到 dashboard
+- **MCP 通知**: 支持 `notifications/claude/channel` 消息推送
+
+### 6. Delegate Command（委托命令）
+
+**文件**: `src/commands/delegate.ts`
+
+CLI 子命令：
+```bash
+maestro delegate "prompt" --to gemini --mode write    # 委派任务
+maestro delegate show                                  # 列出最近执行
+maestro delegate output <id>                           # 获取输出
+maestro delegate status <id>                           # 查看状态
+maestro delegate cancel <id>                           # 取消执行
+maestro delegate message <id> <text>                   # 发送后续消息
+maestro delegate messages <id>                        # 查看消息队列
+```
+
+### 7. Tool-to-Agent 映射
+
+```javascript
+const TOOL_TO_AGENT_TYPE = {
+  gemini:         'gemini',
+  'gemini-a2a':   'gemini-a2a',
+  qwen:           'qwen',
+  codex:          'codex',
+  'codex-server': 'codex-server',
+  claude:         'claude-code',
+  opencode:       'opencode',
+};
+
+const AGENT_TYPE_TO_TERMINAL_CMD = {
+  'gemini':       'gemini',
+  'gemini-a2a':   'gemini',
+  'qwen':         'qwen',
+  'codex':        'codex',
+  'codex-server': 'codex',
+  'claude-code':  'claude',
+  'opencode':     'opencode',
+};
+
+const TOOL_PREFIX = {          // execId 前缀
+  gemini:         'gem',
+  'gemini-a2a':   'gma',
+  qwen:           'qwn',
+  codex:          'cdx',
+  'codex-server': 'cxs',
+  claude:         'cld',
+  opencode:       'opc',
+};
+```
+
+### 8. 数据库 Schema（多租户）
+
+**文件**: `src/db/schema/core/`
+
+```typescript
+// 组织管理
+organizations.ts    → 组织（tenant）隔离
+
+// 用户管理
+users.ts           → 用户账户
+refresh-tokens.ts  → OAuth refresh token
+
+// 权限控制
+permissions.ts     → RBAC 权限模型
+```
+
+### 执行流程总结
+
+```
+用户: maestro delegate "implement login" --to gemini --mode write
+          │
+          ▼
+bin/maestro.js → 命令路由
+          │
+          ▼
+delegate.ts → CliAgentRunner.run()
+          │
+          ├─→ assemblePrompt()      // 组装 prompt
+          │
+          ├─→ createAdapter()       // 选择适配器
+          │     │
+          │     ├─→ backend='direct'  → DashboardBridge
+          │     └─→ backend='terminal' → TerminalAdapter
+          │
+          ├─→ adapter.spawn()       // 启动进程
+          │
+          ├─→ adapter.onEntry()     // 订阅事件
+          │     │
+          │     ├─→ store.appendEntry()   // 持久化到 JSONL
+          │     ├─→ renderEntry()         // 输出到 stdout
+          │     └─→ bridge.forwardEntry() // 转发到 dashboard
+          │
+          └─→ broker.publishEvent() // 发布状态事件
+                │
+                ▼
+              completed / failed / cancelled
+```
+
+---
+
 ## 附录：文件位置
 
 ### 资源位置
@@ -660,88 +871,15 @@ workflow-verifier（full 模式）
 | 文件 | 职责 |
 |------|------|
 | `src/commands/delegate.ts` | `maestro delegate` 命令：解析参数，调用 CliAgentRunner |
-| `src/commands/cli.ts` | `maestro cli` 命令（coordinate 内部使用） |
 | `src/agents/cli-agent-runner.ts` | **统一 CLI agent 执行器**：组装 prompt、启动进程、管理事件 |
 | `src/agents/terminal-adapter.ts` | tmux/wezterm 后端：每 2s 轮询，120s stale 超时 |
 | `src/agents/dashboard-bridge.ts` | Dashboard WebSocket 桥接器 |
 | `src/async/delegate-broker.ts` | Event broker：文件或 SQLite 持久化，pub/sub job 状态 |
 | `src/agents/cli-history-store.ts` | JSONL 历史存储（`{execId}.jsonl` + `.meta.json`） |
-| `src/commands/coordinate.ts` | `maestro coordinate` 命令；`createSpawnFn()` 调用 `maestro cli` |
 | `src/hooks/skill-context.ts` | `UserPromptSubmit` hook：向 Skill agent 注入工作流状态上下文 |
 | `src/tools/team-agents.ts` | Team agents MCP 工具：`spawn_agent`/`shutdown_agent` |
 | `src/agents/parallel-cli-runner.ts` | 并行 CLI runner，支持波次并行执行 |
+| `src/agents/terminal-backend.ts` | tmux/wezterm 底层后端实现 |
+| `src/commands/coordinate.ts` | 已废弃（仅供兼容） |
 
-### Tool-to-Agent 映射
-
-```javascript
-// src/agents/cli-agent-runner.ts
-const TOOL_TO_AGENT_TYPE = {
-  gemini:         'gemini',
-  'gemini-a2a':   'gemini-a2a',
-  qwen:           'qwen',
-  codex:          'codex',
-  'codex-server': 'codex-server',
-  claude:         'claude-code',
-  opencode:       'opencode',
-};
-
-const AGENT_TYPE_TO_TERMINAL_CMD = {
-  'gemini':       'gemini',
-  'gemini-a2a':   'gemini',
-  'qwen':         'qwen',
-  'codex':        'codex',
-  'codex-server': 'codex',
-  'claude-code':  'claude',
-  'opencode':     'opencode',
-};
-
-const TOOL_PREFIX = {
-  gemini:         'gem',
-  'gemini-a2a':   'gma',
-  qwen:           'qwn',
-  codex:          'cdx',
-  'codex-server': 'cxs',
-  claude:         'cld',
-  opencode:       'opc',
-};
-```
-
-### Broker 事件类型
-
-```
-queued → running → completed
-                 → failed
-                 → cancelled
-              ↗
-         input_required
-```
-
-两种 Broker 实现：
-- **FileDelegateBroker**：`delegate-broker.json`（文件锁，跨进程）
-- **SqliteDelegateBroker**：`delegate-broker.sqlite`（WAL 模式，高并发）
-
-### Terminal Adapter 轮询机制
-
-```typescript
-// src/agents/terminal-adapter.ts
-async pollOutput(processId, paneId) {
-  let staleCount = 0;
-  while (this.panes.get(processId)?.polling) {
-    await sleep(2000);              // 每 2s 轮询
-    alive = await this.backend.isAlive(paneId);
-    content = await this.backend.getText(paneId);
-
-    if (content !== lastContent) {
-      emit({ type: 'assistant_message', content: newContent, partial: true });
-      lastContent = content;
-      staleCount = 0;
-    } else {
-      staleCount++;
-      if (staleCount >= 60) {      // 60 × 2s = 120s
-        emit({ type: 'status_change', status: 'stopped', reason: 'stale timeout' });
-        break;
-      }
-    }
-  }
-}
-```
+> **提示**: 详细的 Tool-to-Agent 映射、Broker 事件类型、Terminal Adapter 轮询机制等内容请参见上方 **第十一章 后端核心模块**。
