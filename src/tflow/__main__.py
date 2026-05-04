@@ -98,10 +98,10 @@ def status(session: str | None):
 
     # Try to connect to broker if available
     try:
-        from tflow.broker import JobManager, JsonBroker
+        import asyncio
+        from tflow.broker import JsonBroker
         broker = JsonBroker()
-        manager = JobManager(broker)
-        jobs = manager.list_jobs()
+        jobs = asyncio.run(broker.list_jobs())
         click.echo(f"Active jobs: {len(jobs)}")
     except Exception as e:
         click.echo(f"Broker not available: {e}")
@@ -118,10 +118,10 @@ def session_list():
     """List all sessions"""
     click.echo("Sessions:")
     try:
-        from tflow.broker import JobManager, JsonBroker
+        import asyncio
+        from tflow.broker import JsonBroker
         broker = JsonBroker()
-        manager = JobManager(broker)
-        jobs = manager.list_jobs()
+        jobs = asyncio.run(broker.list_jobs())
         for job in jobs:
             click.echo(f"  - {job.job_id}: {job.status.value}")
     except Exception as e:
@@ -134,10 +134,10 @@ def session_show(session_id: str):
     """Show details of a specific session"""
     click.echo(f"Session: {session_id}")
     try:
-        from tflow.broker import JobManager, JsonBroker
+        import asyncio
+        from tflow.broker import JsonBroker
         broker = JsonBroker()
-        manager = JobManager(broker)
-        job = manager.get_job(session_id)
+        job = asyncio.run(broker.get_job(session_id))
         if job:
             click.echo(f"  Status: {job.status.value}")
             click.echo(f"  Created: {job.created_at}")
