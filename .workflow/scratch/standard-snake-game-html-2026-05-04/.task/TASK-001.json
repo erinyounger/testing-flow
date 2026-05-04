@@ -1,52 +1,57 @@
 {
   "id": "TASK-001",
-  "title": "实现贪吃蛇游戏核心逻辑",
-  "description": "创建单HTML文件贪吃蛇游戏，实现Canvas 2D渲染、游戏循环、蛇移动、食物生成、碰撞检测、游戏状态管理",
+  "title": "贪吃蛇游戏完整实现",
+  "description": "实现单页面贪吃蛇游戏：科技风配色、穿墙穿越、速度调节、用户名排行榜、多球食物支持",
   "type": "feature",
-  "priority": "high",
+  "priority": "medium",
   "effort": "medium",
   "action": "Implement",
-  "scope": "src/index.html",
+  "scope": "frontend",
   "focus_paths": ["index.html"],
   "depends_on": [],
   "convergence": {
     "criteria": [
-      "游戏页面加载后显示20x20网格的Canvas",
-      "游戏循环每100ms更新一次（tick speed = 100ms）",
-      "按方向键或WASD可控制蛇的移动方向",
-      "蛇吃到食物后长度增加，分数增加",
-      "蛇撞墙或撞到自己时游戏结束"
+      "游戏可在浏览器中加载并显示 Canvas 画布",
+      "蛇可使用方向键/WASD 控制移动方向",
+      "蛇穿过边界时从对侧出现（穿墙功能）",
+      "速度滑块可调节游戏难度（100ms-500ms 间隔）",
+      "输入用户名后游戏结束可保存分数到排行榜",
+      "排行榜显示前 10 名玩家分数，按分数降序排列",
+      "画布同时存在 1-5 颗食物球（可配置）",
+      "科技风配色：深色背景 + 霓虹色蛇和食物"
     ],
-    "verification": "浏览器打开index.html，观察游戏运行状态；使用开发者工具检查代码中tick speed设置"
+    "verification": "用浏览器打开 index.html，测试所有功能"
   },
   "files": [
     {
       "path": "index.html",
       "action": "create",
-      "target": "SnakeGame class with Canvas 2D rendering"
+      "target": "贪吃蛇游戏单页面应用"
     }
   ],
   "implementation": [
-    "创建HTML结构：canvas画布、分数显示、开始/重新开始按钮",
-    "实现SnakeGame类：包含蛇（数组）、食物位置、游戏状态、分数",
-    "实现游戏循环：使用requestAnimationFrame，每100ms更新一次",
-    "实现键盘控制：方向键和WASD切换方向",
-    "实现碰撞检测：墙壁碰撞、自撞检测",
-    "实现食物生成：随机位置，不能在蛇身上",
-    "实现游戏状态：playing, paused, gameOver"
+    "创建 HTML 结构：Canvas 画布、控制面板（速度滑块、球数选择）、用户名输入、排行榜显示",
+    "实现游戏循环：requestAnimationFrame + 可配置帧间隔",
+    "实现蛇移动逻辑：方向数组、头部增长、尾部移除",
+    "实现穿墙逻辑：边界检测后坐标环绕",
+    "实现碰撞检测：蛇头与食物、蛇头与蛇身",
+    "实现多球食物：随机生成 1-N 颗食物同时存在",
+    "实现速度调节：滑块控制 gameSpeed (100-500ms)",
+    "实现排行榜：localStorage 存储，JSON 序列化，取前 10 名",
+    "实现科技风样式：深色背景 (#0a0a0f)、霓虹青色蛇 (#00ffff)、霓虹紫色食物 (#ff00ff)、网格线 (#1a1a2e)"
   ],
   "test": {
-    "commands": ["open index.html in browser"],
+    "commands": ["浏览器手动测试"],
     "unit": [],
-    "success_metrics": ["游戏可正常启动", "蛇可移动和控制", "吃食物增长", "碰撞检测正常"]
+    "success_metrics": ["游戏可运行", "穿墙正常", "速度调节生效", "排行榜可保存和显示", "多球食物正常"]
   },
   "reference": {
-    "pattern": "Canvas 2D game loop with state machine",
+    "pattern": "Canvas 2D 游戏开发",
     "files": []
   },
   "meta": {
-    "status": "pending",
-    "estimated_time": "30m",
+    "status": "completed",
+    "estimated_time": "1h",
     "risk": "low",
     "wave": 1,
     "executor": "agent"
