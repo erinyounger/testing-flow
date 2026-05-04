@@ -1,0 +1,53 @@
+{
+  "id": "TASK-001",
+  "title": "实现贪吃蛇游戏核心逻辑",
+  "description": "创建单HTML文件贪吃蛇游戏，实现Canvas 2D渲染、游戏循环、蛇移动、食物生成、碰撞检测、游戏状态管理",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/index.html",
+  "focus_paths": ["index.html"],
+  "depends_on": [],
+  "convergence": {
+    "criteria": [
+      "游戏页面加载后显示20x20网格的Canvas",
+      "按方向键或WASD可控制蛇的移动方向",
+      "蛇吃到食物后长度增加，分数增加",
+      "蛇撞墙或撞到自己时游戏结束"
+    ],
+    "verification": "浏览器打开index.html，观察游戏运行状态"
+  },
+  "files": [
+    {
+      "path": "index.html",
+      "action": "create",
+      "target": "SnakeGame class with Canvas 2D rendering"
+    }
+  ],
+  "implementation": [
+    "创建HTML结构：canvas画布、分数显示、开始/重新开始按钮",
+    "实现SnakeGame类：包含蛇（数组）、食物位置、游戏状态、分数",
+    "实现游戏循环：使用requestAnimationFrame，每100ms更新一次",
+    "实现键盘控制：方向键和WASD切换方向",
+    "实现碰撞检测：墙壁碰撞、自撞检测",
+    "实现食物生成：随机位置，不能在蛇身上",
+    "实现游戏状态：playing, paused, gameOver"
+  ],
+  "test": {
+    "commands": ["open index.html in browser"],
+    "unit": [],
+    "success_metrics": ["游戏可正常启动", "蛇可移动和控制", "吃食物增长", "碰撞检测正常"]
+  },
+  "reference": {
+    "pattern": "Canvas 2D game loop with state machine",
+    "files": []
+  },
+  "meta": {
+    "status": "completed",
+    "estimated_time": "30m",
+    "risk": "low",
+    "wave": 1,
+    "executor": "agent"
+  }
+}

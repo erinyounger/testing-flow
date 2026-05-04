@@ -1,0 +1,55 @@
+{
+  "id": "TASK-002",
+  "title": "添加UI样式和测试验证",
+  "description": "美化游戏界面视觉效果，添加CSS样式，并编写基础测试用例验证游戏逻辑",
+  "type": "feature",
+  "priority": "medium",
+  "effort": "low",
+  "action": "Implement",
+  "scope": "src/index.html, tests/",
+  "focus_paths": ["index.html", "tests/"],
+  "depends_on": ["TASK-001"],
+  "convergence": {
+    "criteria": [
+      "游戏界面具有现代视觉效果（圆角、渐变、阴影）",
+      "分数显示清晰可见，游戏状态有明确提示",
+      "存在基础单元测试覆盖核心游戏逻辑"
+    ],
+    "verification": "浏览器检查视觉效果 + 运行测试命令"
+  },
+  "files": [
+    {
+      "path": "index.html",
+      "action": "update",
+      "target": "SnakeGame class - add CSS styling"
+    },
+    {
+      "path": "tests/snake.test.js",
+      "action": "create",
+      "target": "Unit tests for snake game logic"
+    }
+  ],
+  "implementation": [
+    "添加CSS样式：居中布局、圆角Canvas、深色背景、渐变按钮",
+    "美化蛇的视觉效果：圆角矩形、渐变色",
+    "美化食物显示：带阴影的圆形",
+    "添加分数和状态提示的样式",
+    "编写基础测试：测试碰撞检测、分数计算、蛇增长逻辑"
+  ],
+  "test": {
+    "commands": ["npm test or open index.html"],
+    "unit": ["tests/snake.test.js"],
+    "success_metrics": ["视觉风格现代", "测试通过率100%"]
+  },
+  "reference": {
+    "pattern": "CSS styling for canvas games, basic unit testing",
+    "files": ["index.html (from TASK-001)"]
+  },
+  "meta": {
+    "status": "completed",
+    "estimated_time": "15m",
+    "risk": "low",
+    "wave": 2,
+    "executor": "agent"
+  }
+}
