@@ -1,0 +1,53 @@
+{
+  "id": "TASK-001",
+  "title": "Create core/session.py - Session management module",
+  "description": "Create src/tflow/core/session.py implementing workflow-level Session management. This module should coordinate workflow context, task tracking, and state management across WorkflowEngine, JobManager, and ExecutionStore. The Session class should manage workflow execution context including goal, scope, plan, tasks, and execution state.",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/tflow/core/",
+  "focus_paths": ["src/tflow/core/session.py"],
+  "depends_on": [],
+  "convergence": {
+    "criteria": [
+      "core/session.py exists and imports successfully",
+      "Session class has workflow_id, session_id, status, context attributes",
+      "Session coordinates with WorkflowEngine, JobManager, ExecutionStore",
+      "Session provides task tracking via task_ids list",
+      "Session has to_dict() and from_dict() methods for persistence"
+    ],
+    "verification": "python -c 'from tflow.core.session import Session; print(Session.__doc__)'"
+  },
+  "files": [
+    {
+      "path": "src/tflow/core/session.py",
+      "action": "create",
+      "target": "Session class"
+    }
+  ],
+  "implementation": [
+    "Create Session class with workflow_id, session_id, status, context attributes",
+    "Add task_ids list for tracking associated tasks",
+    "Add context dict for workflow execution context (goal, scope, plan, tasks)",
+    "Add methods: add_task(), remove_task(), set_context(), get_context()",
+    "Add to_dict() and from_dict() for persistence",
+    "Add SessionManager class for creating and tracking sessions"
+  ],
+  "test": {
+    "commands": ["python -c 'from tflow.core.session import Session, SessionManager; print(\"Import OK\")'"],
+    "unit": ["Verify Session has required attributes", "Verify SessionManager creates sessions"],
+    "success_metrics": ["No import errors", "Session has all required attributes"]
+  },
+  "reference": {
+    "pattern": "Follow delegate/session.py pattern but with workflow-level scope",
+    "files": ["src/tflow/delegate/session.py", "src/tflow/workflow/engine.py"]
+  },
+  "meta": {
+    "status": "completed",
+    "estimated_time": "30m",
+    "risk": "low",
+    "wave": 1,
+    "executor": "agent"
+  }
+}

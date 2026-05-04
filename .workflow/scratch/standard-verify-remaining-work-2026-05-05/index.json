@@ -1,0 +1,21 @@
+{
+  "id": "standard-verify-remaining-work-2026-05-05",
+  "type": "standard",
+  "title": "开发剩余功能，并启用SubAgent进行严苛代码检视是否与设计文档保持一致",
+  "status": "completed",
+  "created_at": "2026-05-05T02:00:00",
+  "updated_at": "2026-05-05T02:00:00",
+  "flags": {
+    "discuss": false,
+    "full": true
+  },
+  "plan": {
+    "task_ids": ["TASK-001", "TASK-002"],
+    "task_count": 2
+  },
+  "execution": {
+    "method": "agent",
+    "tasks_completed": 0,
+    "tasks_total": 0
+  }
+}

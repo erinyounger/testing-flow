@@ -1,0 +1,52 @@
+{
+  "id": "TASK-002",
+  "title": "Create core/events.py - Core event definitions",
+  "description": "Create src/tflow/core/events.py implementing core event infrastructure. This module should provide base event types and utilities that unify the event handling across the system. Currently JobEvent is in broker/event.py and BridgeEvent is in realtime/bridge.py - core/events.py should provide the foundational event classes.",
+  "type": "feature",
+  "priority": "high",
+  "effort": "medium",
+  "action": "Implement",
+  "scope": "src/tflow/core/",
+  "focus_paths": ["src/tflow/core/events.py"],
+  "depends_on": [],
+  "convergence": {
+    "criteria": [
+      "core/events.py exists and imports successfully",
+      "CoreEvent base class is defined",
+      "EventType enum with common event types",
+      "Event payload serialization support",
+      "Integration with existing broker/event.py JobEvent"
+    ],
+    "verification": "python -c 'from tflow.core.events import CoreEvent, EventType; print(CoreEvent.__doc__)'"
+  },
+  "files": [
+    {
+      "path": "src/tflow/core/events.py",
+      "action": "create",
+      "target": "CoreEvent and EventType"
+    }
+  ],
+  "implementation": [
+    "Create EventType enum with common event types (WORKFLOW_STARTED, WORKFLOW_COMPLETED, TASK_CREATED, TASK_COMPLETED, etc.)",
+    "Create CoreEvent base class with event_id, event_type, timestamp, payload attributes",
+    "Add to_dict() and from_dict() for serialization",
+    "Create EventEmitter mixin for publish-subscribe pattern",
+    "Export JobEvent from broker/event.py for compatibility"
+  ],
+  "test": {
+    "commands": ["python -c 'from tflow.core.events import CoreEvent, EventType; print(\"Import OK\")'"],
+    "unit": ["Verify CoreEvent has required attributes", "Verify EventType enum values"],
+    "success_metrics": ["No import errors", "CoreEvent is properly structured"]
+  },
+  "reference": {
+    "pattern": "Follow broker/event.py JobEvent pattern for event structure",
+    "files": ["src/tflow/broker/event.py", "src/tflow/realtime/bridge.py"]
+  },
+  "meta": {
+    "status": "completed",
+    "estimated_time": "30m",
+    "risk": "low",
+    "wave": 1,
+    "executor": "agent"
+  }
+}

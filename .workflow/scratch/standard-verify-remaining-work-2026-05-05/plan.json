@@ -1,0 +1,48 @@
+{
+  "summary": "Create missing core/session.py and core/events.py modules to complete the tflow architecture per design document Section 3.1",
+  "approach": "Implement the two missing core modules that the design document specifies should exist in src/tflow/core/. Task 1 creates session management for workflow context coordination. Task 2 creates core event definitions.",
+  "task_ids": ["TASK-001", "TASK-002"],
+  "task_count": 2,
+  "complexity": "medium",
+  "estimated_time": "1h",
+  "recommended_execution": "Agent",
+  "waves": [
+    {
+      "wave": 1,
+      "tasks": ["TASK-001", "TASK-002"]
+    }
+  ],
+  "design_decisions": [
+    {
+      "decision": "core/session.py should provide workflow-level Session management",
+      "rationale": "Design Section 3.1 specifies Session management in core/ for coordinating WorkflowEngine, JobManager, and ExecutionStore"
+    },
+    {
+      "decision": "core/events.py should provide base event infrastructure",
+      "rationale": "Design Section 3.1 specifies events.py in core/ as the central event definition location"
+    }
+  ],
+  "shared_context": {
+    "patterns": [
+      "Follow existing dataclass-based design in codebase",
+      "Use typing.Optional for optional fields",
+      "Async methods for I/O operations"
+    ],
+    "conventions": [
+      "All modules have docstrings",
+      " dataclass for data structures",
+      "Enum for status/choice fields"
+    ],
+    "dependencies": [
+      "core/executor.py (already exists)",
+      "workflow/engine.py (already exists)",
+      "broker/job_manager.py (already exists)"
+    ]
+  },
+  "_metadata": {
+    "timestamp": "2026-05-05T00:00:00Z",
+    "source": "agent-planner",
+    "planning_mode": "standard",
+    "plan_type": "feature"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "task_id": "TASK-002",
+  "title": "Create core/events.py - Core event definitions",
+  "status": "completed",
+  "changes": [
+    {
+      "file": "src/tflow/core/events.py",
+      "action": "created",
+      "description": "Created EventType enum, CoreEvent base class, EventEmitter mixin; re-exports JobEvent from broker/event.py for compatibility"
+    }
+  ],
+  "verification": [
+    {
+      "criterion": "core/events.py exists and imports successfully",
+      "verified": true,
+      "method": "python -c 'from tflow.core.events import CoreEvent, EventType'"
+    },
+    {
+      "criterion": "CoreEvent base class is defined",
+      "verified": true,
+      "method": "CoreEvent instance created with event_id, event_type, timestamp, payload"
+    },
+    {
+      "criterion": "EventType enum with common event types",
+      "verified": true,
+      "method": "EventType includes WORKFLOW_*, TASK_*, SESSION_*, AGENT_* event types"
+    },
+    {
+      "criterion": "Event payload serialization support",
+      "verified": true,
+      "method": "to_dict() and from_dict() methods implemented"
+    },
+    {
+      "criterion": "Integration with existing broker/event.py JobEvent",
+      "verified": true,
+      "method": "JobEvent re-exported from broker.event for compatibility"
+    }
+  ],
+  "commit": {
+    "sha": "5b39b22",
+    "message": "TASK-002: 创建 core/events.py - 核心事件定义"
+  },
+  "notes": [
+    "EventEmitter mixin provides publish-subscribe pattern",
+    "CoreEvent follows broker/event.py JobEvent pattern for consistency"
+  ]
+}
