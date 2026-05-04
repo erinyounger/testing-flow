@@ -16,8 +16,6 @@
 
   "read_first": [],
   "depends_on": [],
-  "wave": 1,
-  "executor": "agent",
 
   "convergence": {
     "criteria": [
@@ -51,6 +49,8 @@
   },
 
   "meta": {
+    "wave": 1,
+    "executor": "agent",
     "estimated_time": null,
     "risk": "low",
     "checkpoint": false
